@@ -34,6 +34,19 @@ const zoomOverlay    = document.getElementById('zoom-overlay');
 const zoomImg        = document.getElementById('zoom-img');
 const viewerPage     = document.getElementById('viewer-page');
 
+const btnToc            = document.getElementById('btn-toc');
+const btnSearch         = document.getElementById('btn-search');
+const sidePanel         = document.getElementById('side-panel');
+const btnPanelClose     = document.getElementById('btn-panel-close');
+const tabToc            = document.getElementById('tab-toc');
+const tabSearch         = document.getElementById('tab-search');
+const sectionToc        = document.getElementById('section-toc');
+const sectionSearch     = document.getElementById('section-search');
+const tocList           = document.getElementById('toc-list');
+const searchBoxInput    = document.getElementById('search-box-input');
+const btnSearchTrigger  = document.getElementById('btn-search-trigger');
+const searchResultsList = document.getElementById('search-results-list');
+
 // ─── State ────────────────────────────────────────────────────────────────
 
 let pageFlip       = null;
@@ -47,6 +60,8 @@ let bookMode       = 'pdf';  // 'pdf' or 'webp'
 let bookBaseURL    = '';     // base URL for WebP images folder
 let currentMeta    = null;
 let isRebuilding   = false;
+let searchIndexData = null;  // full text search cache
+let searchLoading   = false;
 
 const RENDER_SCALE   = 3.0; // 3.0x scale for crisp Retina quality
 const PREFETCH_AHEAD = 3;
@@ -636,3 +651,259 @@ async function handleResize() {
 }
 
 window.addEventListener('resize', debounce(handleResize, 150));
+
+// ─── Side Panel (Index & Search) ──────────────────────────────────────
+
+function openSidePanel(activeTab = 'toc') {
+  sidePanel.classList.add('active');
+
+  if (activeTab === 'toc') {
+    tabToc.classList.add('active');
+    tabSearch.classList.remove('active');
+    sectionToc.classList.add('active');
+    sectionSearch.classList.remove('active');
+    
+    // Load Table of Contents
+    if (bookMode === 'pdf') {
+      loadPDFOutline();
+    } else {
+      loadWebPOTOC(currentMeta);
+    }
+  } else {
+    tabToc.classList.remove('active');
+    tabSearch.classList.add('active');
+    sectionToc.classList.remove('active');
+    sectionSearch.classList.add('active');
+    setTimeout(() => searchBoxInput.focus(), 150);
+  }
+}
+
+function closeSidePanel() {
+  sidePanel.classList.remove('active');
+}
+
+btnToc.addEventListener('click', () => {
+  if (sidePanel.classList.contains('active') && sectionToc.classList.contains('active')) {
+    closeSidePanel();
+  } else {
+    openSidePanel('toc');
+  }
+});
+
+btnSearch.addEventListener('click', () => {
+  if (sidePanel.classList.contains('active') && sectionSearch.classList.contains('active')) {
+    closeSidePanel();
+  } else {
+    openSidePanel('search');
+  }
+});
+
+btnPanelClose.addEventListener('click', closeSidePanel);
+
+// Tab switching
+tabToc.addEventListener('click', () => openSidePanel('toc'));
+tabSearch.addEventListener('click', () => openSidePanel('search'));
+
+// Search trigger
+btnSearchTrigger.addEventListener('click', doSearch);
+searchBoxInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+});
+
+function doSearch() {
+  const query = searchBoxInput.value.trim();
+  if (!query) return;
+  if (bookMode === 'pdf') {
+    searchPDF(query);
+  } else {
+    searchWebP(query);
+  }
+}
+
+// ─── TOC / Index loaders ──────────────────────────────────────────────────
+
+async function loadPDFOutline() {
+  tocList.innerHTML = '<div class="text-sm text-muted">Loading outline…</div>';
+  try {
+    const outline = await pdfDoc.getOutline();
+    if (!outline || outline.length === 0) {
+      tocList.innerHTML = '<div class="text-sm text-muted">No index bookmarks found.</div>';
+      return;
+    }
+
+    // Resolve page index numbers for outline items in parallel
+    const items = await Promise.all(
+      outline.map(async item => {
+        let pageNum = null;
+        if (item.dest) {
+          try {
+            const dest = item.dest;
+            const ref = typeof dest === 'string' ? dest : dest[0];
+            if (ref && typeof ref === 'object') {
+              const pageIdx = await pdfDoc.getPageIndex(ref);
+              pageNum = pageIdx + 1;
+            } else if (typeof ref === 'number') {
+              pageNum = ref + 1;
+            }
+          } catch (e) {}
+        }
+        return {
+          title: item.title,
+          page: pageNum
+        };
+      })
+    );
+
+    const validItems = items.filter(i => i.page !== null);
+    if (validItems.length === 0) {
+      tocList.innerHTML = '<div class="text-sm text-muted">No index bookmarks found.</div>';
+    } else {
+      renderTOC(validItems);
+    }
+  } catch (err) {
+    tocList.innerHTML = '<div class="text-sm text-muted">No index bookmarks found.</div>';
+  }
+}
+
+function loadWebPOTOC(meta) {
+  if (meta && meta.index && meta.index.length > 0) {
+    renderTOC(meta.index);
+  } else {
+    tocList.innerHTML = '<div class="text-sm text-muted">No index bookmarks found.</div>';
+  }
+}
+
+function renderTOC(items) {
+  tocList.innerHTML = '';
+  items.forEach(item => {
+    const btn = document.createElement('button');
+    btn.className = 'chapter-item';
+    btn.innerHTML = `
+      <span class="chapter-title">${item.title}</span>
+      <span class="chapter-page">Page ${item.page}</span>
+    `;
+    btn.addEventListener('click', () => {
+      pageFlip?.flip(item.page - 1);
+      closeSidePanel();
+    });
+    tocList.appendChild(btn);
+  });
+}
+
+// ─── Search implementation ────────────────────────────────────────────────
+
+async function loadSearchIndex() {
+  if (searchIndexData) return true;
+  if (searchLoading) return false;
+  searchLoading = true;
+
+  try {
+    const res = await fetch(`${bookBaseURL}/search_index.json`);
+    if (res.ok) {
+      searchIndexData = await res.json();
+      searchLoading = false;
+      return true;
+    }
+  } catch (e) {
+    console.warn('Failed to load search index', e);
+  }
+  searchLoading = false;
+  return false;
+}
+
+async function searchWebP(query) {
+  searchResultsList.innerHTML = '<div class="text-sm text-muted">Loading search index…</div>';
+  const loaded = await loadSearchIndex();
+  if (!loaded) {
+    searchResultsList.innerHTML = '<div class="text-sm text-muted">Search index is not available.</div>';
+    return;
+  }
+
+  searchResultsList.innerHTML = '<div class="text-sm text-muted">Searching pages…</div>';
+  const lowercaseQuery = query.toLowerCase();
+  const results = [];
+
+  searchIndexData.forEach(item => {
+    const text = item.text || '';
+    if (text.toLowerCase().includes(lowercaseQuery)) {
+      const idx = text.toLowerCase().indexOf(lowercaseQuery);
+      const start = Math.max(0, idx - 40);
+      const end = Math.min(text.length, idx + query.length + 40);
+      let snippet = text.substring(start, end);
+      if (start > 0) snippet = '…' + snippet;
+      if (end < text.length) snippet = snippet + '…';
+
+      const regex = new RegExp(`(${escapeRegExp(query)})`, 'gi');
+      snippet = snippet.replace(regex, '<mark>$1</mark>');
+
+      results.push({
+        page: item.page,
+        snippet: snippet
+      });
+    }
+  });
+
+  renderSearchResults(results);
+}
+
+async function searchPDF(query) {
+  searchResultsList.innerHTML = '<div class="text-sm text-muted">Searching PDF pages…</div>';
+  const lowercaseQuery = query.toLowerCase();
+  const results = [];
+
+  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+    try {
+      const page = await pdfDoc.getPage(pageNum);
+      const tc = await page.getTextContent();
+      const text = tc.items.map(item => item.str).join(' ');
+
+      if (text.toLowerCase().includes(lowercaseQuery)) {
+        const idx = text.toLowerCase().indexOf(lowercaseQuery);
+        const start = Math.max(0, idx - 40);
+        const end = Math.min(text.length, idx + query.length + 40);
+        let snippet = text.substring(start, end);
+        if (start > 0) snippet = '…' + snippet;
+        if (end < text.length) snippet = snippet + '…';
+
+        const regex = new RegExp(`(${escapeRegExp(query)})`, 'gi');
+        snippet = snippet.replace(regex, '<mark>$1</mark>');
+
+        results.push({
+          page: pageNum,
+          snippet: snippet
+        });
+      }
+    } catch (e) {}
+  }
+
+  renderSearchResults(results);
+}
+
+function renderSearchResults(results) {
+  searchResultsList.innerHTML = '';
+  if (results.length === 0) {
+    searchResultsList.innerHTML = '<div class="text-sm text-muted">No matches found.</div>';
+    return;
+  }
+
+  results.forEach(result => {
+    const btn = document.createElement('button');
+    btn.className = 'search-result-item';
+    btn.innerHTML = `
+      <div class="search-result-header">
+        <span>Result</span>
+        <span>Page ${result.page}</span>
+      </div>
+      <div class="search-result-snippet">${result.snippet}</div>
+    `;
+    btn.addEventListener('click', () => {
+      pageFlip?.flip(result.page - 1);
+      closeSidePanel();
+    });
+    searchResultsList.appendChild(btn);
+  });
+}
+
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

@@ -31,17 +31,49 @@ def convert_pdf_to_webp(pdf_path, output_dir, dpi=150):
         pix.save(output_file, jpg_quality=85)
         print(f"Rendered page {page_num + 1}/{len(doc)}")
 
+    # 1. Extract PDF Bookmarks / Table of Contents (TOC)
+    index_list = []
+    try:
+        toc = doc.get_toc()
+        for item in toc:
+            # item format: [level, title, page_num]
+            index_list.append({
+                "title": item[1],
+                "page": item[2]
+            })
+    except Exception as e:
+        print(f"Could not extract table of contents: {e}")
+
+    # 2. Extract Full Text for search index
+    search_index = []
+    print("Extracting text for full-text search index...")
+    for page_num in range(len(doc)):
+        try:
+            page = doc.load_page(page_num)
+            text = page.get_text().strip()
+            search_index.append({
+                "page": page_num + 1,
+                "text": text
+            })
+        except Exception as e:
+            print(f"Error extracting text on page {page_num + 1}: {e}")
+
     # Generate metadata file
     meta = {
         "slug": book_slug,
         "title": book_slug.replace("_", " ").title(),
         "pages": len(doc),
         "extension": "jpg",
+        "index": index_list,
         "created": int(fitz.time_now() * 1000) if hasattr(fitz, "time_now") else 0
     }
     
-    with open(os.path.join(target_dir, "meta.json"), "w") as f:
-      json.dump(meta, f, indent=2)
+    with open(os.path.join(target_dir, "meta.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2, ensure_ascii=False)
+
+    # Save search index
+    with open(os.path.join(target_dir, "search_index.json"), "w", encoding="utf-8") as f:
+        json.dump(search_index, f, indent=2, ensure_ascii=False)
 
     print(f"\nDone! Output saved to: {target_dir}")
     print(f"\nNext Steps:\n1. Commit the newly generated folder to your GitHub repository.")
