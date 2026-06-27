@@ -65,7 +65,10 @@ if (pdfParam) {
 // ─── Security ─────────────────────────────────────────────────────────────
 
 document.addEventListener('contextmenu', e => e.preventDefault());
-document.addEventListener('dragstart',   e => e.preventDefault());
+document.addEventListener('dragstart',   e => {
+  if (e.target.closest('#flipbook')) return;
+  e.preventDefault();
+});
 document.addEventListener('selectstart', e => { if (!isInput(e.target)) e.preventDefault(); });
 document.addEventListener('keydown', e => {
   if (e.ctrlKey && ['s','p','u'].includes(e.key.toLowerCase())) e.preventDefault();
@@ -167,6 +170,27 @@ async function buildFlipbook() {
   pageURLs = Array(totalPages).fill(placeholder);
   pageURLs[0] = firstURL;
 
+  // Build DOM elements for StPageFlip HTML mode
+  flipbookEl.innerHTML = '';
+  for (let i = 0; i < totalPages; i++) {
+    const pageDiv = document.createElement('div');
+    pageDiv.className = 'page';
+    if (i === 0 || i === totalPages - 1) {
+      pageDiv.setAttribute('data-density', 'hard');
+    }
+
+    const img = document.createElement('img');
+    img.src = pageURLs[i];
+    img.alt = `Page ${i + 1}`;
+    img.style.width = '100%';
+    img.style.height = '100%';
+    img.style.objectFit = 'contain';
+    img.style.display = 'block';
+
+    pageDiv.appendChild(img);
+    flipbookEl.appendChild(pageDiv);
+  }
+
   // Initialize StPageFlip
   pageFlip = new St.PageFlip(flipbookEl, {
     width:      pageW,
@@ -184,7 +208,7 @@ async function buildFlipbook() {
     autoSize:    false,
   });
 
-  pageFlip.loadFromImages(pageURLs);
+  pageFlip.loadFromHTML(flipbookEl.querySelectorAll('.page'));
 
   pageFlip.on('flip', e => {
     updatePageUI(e.data);
@@ -234,7 +258,6 @@ async function renderPage(pageNum) {
 async function prefetchAround(pageIndex) {
   const start = Math.max(0, pageIndex - 1);
   const end   = Math.min(totalPages - 1, pageIndex + PREFETCH_AHEAD);
-  let changed = false;
 
   for (let i = start; i <= end; i++) {
     if (!pageURLs[i].startsWith('data:')) continue; // already rendered
@@ -242,16 +265,19 @@ async function prefetchAround(pageIndex) {
 
     rendering[i] = true;
     try {
-      pageURLs[i] = await renderPage(i + 1); // PDF.js is 1-indexed
-      changed = true;
-    } catch {
-      // skip failed pages
+      const url = await renderPage(i + 1); // PDF.js is 1-indexed
+      pageURLs[i] = url;
+
+      // Update DOM page image
+      const pageDivs = flipbookEl.querySelectorAll('.page');
+      if (pageDivs[i]) {
+        const img = pageDivs[i].querySelector('img');
+        if (img) img.src = url;
+      }
+    } catch (e) {
+      console.error('Failed to prefetch page:', i + 1, e);
     }
     rendering[i] = false;
-  }
-
-  if (changed && pageFlip) {
-    try { pageFlip.updateFromImages(pageURLs); } catch { /* swallow */ }
   }
 }
 
@@ -307,7 +333,14 @@ async function onDoubleClick() {
 
   // Ensure page is rendered
   if (pageURLs[pageIndex].startsWith('data:')) {
-    pageURLs[pageIndex] = await renderPage(pageIndex + 1);
+    const url = await renderPage(pageIndex + 1);
+    pageURLs[pageIndex] = url;
+    
+    const pageDivs = flipbookEl.querySelectorAll('.page');
+    if (pageDivs[pageIndex]) {
+      const img = pageDivs[pageIndex].querySelector('img');
+      if (img) img.src = url;
+    }
   }
 
   zoomImg.src = pageURLs[pageIndex];
