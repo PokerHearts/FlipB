@@ -60,6 +60,7 @@ let bookMode       = 'pdf';  // 'pdf' or 'webp'
 let bookBaseURL    = '';     // base URL for WebP images folder
 let currentMeta    = null;
 let isRebuilding   = false;
+let resolvedOutline = [];    // cache for TOC bookmarks
 let searchIndexData = null;  // full text search cache
 let searchLoading   = false;
 
@@ -723,6 +724,10 @@ function doSearch() {
 // ─── TOC / Index loaders ──────────────────────────────────────────────────
 
 async function loadPDFOutline() {
+  if (resolvedOutline.length > 0) {
+    renderTOC(resolvedOutline);
+    return;
+  }
   tocList.innerHTML = '<div class="text-sm text-muted">Loading outline…</div>';
   try {
     const outline = await pdfDoc.getOutline();
@@ -754,11 +759,11 @@ async function loadPDFOutline() {
       })
     );
 
-    const validItems = items.filter(i => i.page !== null);
-    if (validItems.length === 0) {
+    resolvedOutline = items.filter(i => i.page !== null);
+    if (resolvedOutline.length === 0) {
       tocList.innerHTML = '<div class="text-sm text-muted">No index bookmarks found.</div>';
     } else {
-      renderTOC(validItems);
+      renderTOC(resolvedOutline);
     }
   } catch (err) {
     tocList.innerHTML = '<div class="text-sm text-muted">No index bookmarks found.</div>';
@@ -792,53 +797,48 @@ function renderTOC(items) {
 
 // ─── Search implementation ────────────────────────────────────────────────
 
-async function loadSearchIndex() {
-  if (searchIndexData) return true;
-  if (searchLoading) return false;
-  searchLoading = true;
-
-  try {
-    const res = await fetch(`${bookBaseURL}/search_index.json`);
-    if (res.ok) {
-      searchIndexData = await res.json();
-      searchLoading = false;
-      return true;
-    }
-  } catch (e) {
-    console.warn('Failed to load search index', e);
-  }
-  searchLoading = false;
-  return false;
-}
-
-async function searchWebP(query) {
-  searchResultsList.innerHTML = '<div class="text-sm text-muted">Loading search index…</div>';
-  const loaded = await loadSearchIndex();
-  if (!loaded) {
-    searchResultsList.innerHTML = '<div class="text-sm text-muted">Search index is not available.</div>';
+function doSearch() {
+  const query = searchBoxInput.value.trim();
+  if (!query) {
+    searchResultsList.innerHTML = '<div class="text-sm text-muted">Type a word to search the pages.</div>';
     return;
   }
 
-  searchResultsList.innerHTML = '<div class="text-sm text-muted">Searching pages…</div>';
-  const lowercaseQuery = query.toLowerCase();
+  searchResultsList.innerHTML = '<div class="text-sm text-muted">Searching index…</div>';
+  
+  // Get source list
+  let sourceList = [];
+  if (bookMode === 'pdf') {
+    sourceList = resolvedOutline;
+  } else {
+    sourceList = (currentMeta && currentMeta.index) ? currentMeta.index : [];
+  }
+
+  const queryWords = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (queryWords.length === 0) {
+    searchResultsList.innerHTML = '<div class="text-sm text-muted">Type a word to search.</div>';
+    return;
+  }
+
   const results = [];
-
-  searchIndexData.forEach(item => {
-    const text = item.text || '';
-    if (text.toLowerCase().includes(lowercaseQuery)) {
-      const idx = text.toLowerCase().indexOf(lowercaseQuery);
-      const start = Math.max(0, idx - 40);
-      const end = Math.min(text.length, idx + query.length + 40);
-      let snippet = text.substring(start, end);
-      if (start > 0) snippet = '…' + snippet;
-      if (end < text.length) snippet = snippet + '…';
-
-      const regex = new RegExp(`(${escapeRegExp(query)})`, 'gi');
-      snippet = snippet.replace(regex, '<mark>$1</mark>');
+  sourceList.forEach(item => {
+    const title = item.title || '';
+    const lowercaseTitle = title.toLowerCase();
+    
+    // Check if ALL query words are found in the chapter title (wildcard match)
+    const isMatch = queryWords.every(word => lowercaseTitle.includes(word));
+    
+    if (isMatch) {
+      // Highlight matching words in the title
+      let highlightedTitle = title;
+      queryWords.forEach(word => {
+        const regex = new RegExp(`(${escapeRegExp(word)})`, 'gi');
+        highlightedTitle = highlightedTitle.replace(regex, '<mark>$1</mark>');
+      });
 
       results.push({
-        page: item.page,
-        snippet: snippet
+        title: highlightedTitle,
+        page: item.page
       });
     }
   });
@@ -846,43 +846,10 @@ async function searchWebP(query) {
   renderSearchResults(results);
 }
 
-async function searchPDF(query) {
-  searchResultsList.innerHTML = '<div class="text-sm text-muted">Searching PDF pages…</div>';
-  const lowercaseQuery = query.toLowerCase();
-  const results = [];
-
-  for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-    try {
-      const page = await pdfDoc.getPage(pageNum);
-      const tc = await page.getTextContent();
-      const text = tc.items.map(item => item.str).join(' ');
-
-      if (text.toLowerCase().includes(lowercaseQuery)) {
-        const idx = text.toLowerCase().indexOf(lowercaseQuery);
-        const start = Math.max(0, idx - 40);
-        const end = Math.min(text.length, idx + query.length + 40);
-        let snippet = text.substring(start, end);
-        if (start > 0) snippet = '…' + snippet;
-        if (end < text.length) snippet = snippet + '…';
-
-        const regex = new RegExp(`(${escapeRegExp(query)})`, 'gi');
-        snippet = snippet.replace(regex, '<mark>$1</mark>');
-
-        results.push({
-          page: pageNum,
-          snippet: snippet
-        });
-      }
-    } catch (e) {}
-  }
-
-  renderSearchResults(results);
-}
-
 function renderSearchResults(results) {
   searchResultsList.innerHTML = '';
   if (results.length === 0) {
-    searchResultsList.innerHTML = '<div class="text-sm text-muted">No matches found.</div>';
+    searchResultsList.innerHTML = '<div class="text-sm text-muted">No matching chapters found in the index.</div>';
     return;
   }
 
@@ -890,11 +857,10 @@ function renderSearchResults(results) {
     const btn = document.createElement('button');
     btn.className = 'search-result-item';
     btn.innerHTML = `
-      <div class="search-result-header">
-        <span>Result</span>
-        <span>Page ${result.page}</span>
+      <div class="search-result-header" style="margin-bottom: 0;">
+        <span class="chapter-title" style="font-weight: 500;">${result.title}</span>
+        <span class="chapter-page">Page ${result.page}</span>
       </div>
-      <div class="search-result-snippet">${result.snippet}</div>
     `;
     btn.addEventListener('click', () => {
       pageFlip?.flip(result.page - 1);
