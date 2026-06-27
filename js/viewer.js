@@ -187,7 +187,7 @@ async function buildFlipbookPDF() {
 
   let pageW, pageH;
   const isMobile = window.innerWidth < 640;
-  const useSinglePage = isMobile || isLandscapePDF;
+  const useSinglePage = isMobile;
 
   if (useSinglePage) {
     // Single page mode: fit width, clamp height to stage
@@ -241,17 +241,17 @@ async function buildFlipbookPDF() {
   pageFlip = new St.PageFlip(flipbookEl, {
     width:      pageW,
     height:     pageH,
-    size:       'fixed',
-    minWidth:   useSinglePage ? pageW : pageW * 2,
-    maxWidth:   useSinglePage ? pageW : pageW * 2,
-    minHeight:  pageH,
-    maxHeight:  pageH,
+    size:       'stretch',
+    minWidth:   useSinglePage ? 200 : 400,
+    maxWidth:   useSinglePage ? 2000 : 4000,
+    minHeight:  200,
+    maxHeight:  2000,
     maxShadowOpacity: 0.5,
     showCover:  !useSinglePage,
     mobileScrollSupport: true,
     swipeDistance: 30,
     usePortrait: useSinglePage,
-    autoSize:    false,
+    autoSize:    true,
   });
 
   pageFlip.loadFromHTML(flipbookEl.querySelectorAll('.page'));
@@ -276,6 +276,7 @@ async function buildFlipbookPDF() {
   document.addEventListener('keydown', onKeydown);
   flipbookEl.addEventListener('dblclick', onDoubleClick);
   zoomOverlay.addEventListener('click', () => zoomOverlay.classList.remove('active'));
+  document.getElementById('btn-fs-close').addEventListener('click', toggleFullscreen);
 }
 
 // ─── Build WebP Flipbook ──────────────────────────────────────────────────
@@ -312,7 +313,7 @@ async function buildFlipbookWebP(meta) {
 
   let pageW, pageH;
   const isMobile = window.innerWidth < 640;
-  const useSinglePage = isMobile || isLandscapePDF;
+  const useSinglePage = isMobile;
 
   if (useSinglePage) {
     pageW = stageW - 16;
@@ -357,17 +358,17 @@ async function buildFlipbookWebP(meta) {
   pageFlip = new St.PageFlip(flipbookEl, {
     width:      pageW,
     height:     pageH,
-    size:       'fixed',
-    minWidth:   useSinglePage ? pageW : pageW * 2,
-    maxWidth:   useSinglePage ? pageW : pageW * 2,
-    minHeight:  pageH,
-    maxHeight:  pageH,
+    size:       'stretch',
+    minWidth:   useSinglePage ? 200 : 400,
+    maxWidth:   useSinglePage ? 2000 : 4000,
+    minHeight:  200,
+    maxHeight:  2000,
     maxShadowOpacity: 0.5,
     showCover:  !useSinglePage,
     mobileScrollSupport: true,
     swipeDistance: 30,
     usePortrait: useSinglePage,
-    autoSize:    false,
+    autoSize:    true,
   });
 
   pageFlip.loadFromHTML(flipbookEl.querySelectorAll('.page'));
@@ -392,6 +393,7 @@ async function buildFlipbookWebP(meta) {
   document.addEventListener('keydown', onKeydown);
   flipbookEl.addEventListener('dblclick', onDoubleClick);
   zoomOverlay.addEventListener('click', () => zoomOverlay.classList.remove('active'));
+  document.getElementById('btn-fs-close').addEventListener('click', toggleFullscreen);
 }
 
 // ─── Render a single PDF page to blob URL ─────────────────────────────────
@@ -542,6 +544,11 @@ document.addEventListener('fullscreenchange', async () => {
       } catch (err) {}
     }
   }
+  
+  // Recalculate book size after fullscreen layout transition completes
+  setTimeout(() => {
+    pageFlip?.update();
+  }, 100);
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -568,3 +575,7 @@ function exitFsIcon() {
   return `<path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
     d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>`;
 }
+
+window.addEventListener('resize', () => {
+  pageFlip?.update();
+});

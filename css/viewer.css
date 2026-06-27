@@ -211,27 +211,48 @@
 
 /* ─── Fullscreen adjustments ──────────────────────────────────────────── */
 :fullscreen .viewer-nav,
-:fullscreen .viewer-bottom {
-  opacity: 0;
-  transition: opacity 0.3s ease;
-}
-
-:fullscreen:hover .viewer-nav,
-:fullscreen:hover .viewer-bottom,
-:fullscreen .viewer-nav:hover,
-:fullscreen .viewer-bottom:hover {
-  opacity: 1;
-}
-
+:fullscreen .viewer-bottom,
 :-webkit-full-screen .viewer-nav,
 :-webkit-full-screen .viewer-bottom {
-  opacity: 0;
-  transition: opacity 0.3s ease;
+  display: none !important;
 }
 
-:-webkit-full-screen:hover .viewer-nav,
-:-webkit-full-screen:hover .viewer-bottom {
-  opacity: 1;
+:fullscreen .viewer-stage,
+:-webkit-full-screen .viewer-stage {
+  padding: 0 !important;
+  height: 100vh !important;
+  width: 100vw !important;
+  background-color: #0c111d !important;
+}
+
+/* Floating Fullscreen Close Button */
+.fs-close-btn {
+  display: none;
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: white;
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 100;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(8px);
+}
+
+.fs-close-btn:hover {
+  background: rgba(15, 23, 42, 0.9);
+  transform: scale(1.05);
+}
+
+:fullscreen .fs-close-btn,
+:-webkit-full-screen .fs-close-btn {
+  display: flex;
 }
 
 /* ─── Zoom Overlay ────────────────────────────────────────────────────── */
