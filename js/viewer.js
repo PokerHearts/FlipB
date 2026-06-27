@@ -35,11 +35,21 @@ const zoomImg        = document.getElementById('zoom-img');
 const viewerPage     = document.getElementById('viewer-page');
 
 const btnToc            = document.getElementById('btn-toc');
+const btnSearch         = document.getElementById('btn-search');
 const sidePanel         = document.getElementById('side-panel');
 const btnPanelClose     = document.getElementById('btn-panel-close');
+const tabToc            = document.getElementById('tab-toc');
+const tabSearch         = document.getElementById('tab-search');
+const sectionToc        = document.getElementById('section-toc');
+const sectionSearch     = document.getElementById('section-search');
 const tocList           = document.getElementById('toc-list');
+const searchBoxInput    = document.getElementById('search-box-input');
+const btnSearchTrigger  = document.getElementById('btn-search-trigger');
+const searchResultsList = document.getElementById('search-results-list');
 
 // ─── State ────────────────────────────────────────────────────────────────
+
+let bookIndex      = [];     // Cache of chapters/outline bookmarks for searching
 
 let pageFlip       = null;
 let pdfDoc         = null;
@@ -642,16 +652,31 @@ async function handleResize() {
 
 window.addEventListener('resize', debounce(handleResize, 150));
 
-// ─── Side Panel (Index) ───────────────────────────────────────────────────
+// ─── Side Panel (Index & Search) ──────────────────────────────────────
 
-function openSidePanel() {
+function openSidePanel(activeTab = 'toc') {
   sidePanel.classList.add('active');
-  
-  // Load Table of Contents
-  if (bookMode === 'pdf') {
-    loadPDFOutline();
+
+  if (activeTab === 'toc') {
+    tabToc.classList.add('active');
+    tabSearch.classList.remove('active');
+    sectionToc.classList.add('active');
+    sectionSearch.classList.remove('active');
   } else {
-    loadWebPOTOC(currentMeta);
+    tabToc.classList.remove('active');
+    tabSearch.classList.add('active');
+    sectionToc.classList.remove('active');
+    sectionSearch.classList.add('active');
+    setTimeout(() => searchBoxInput.focus(), 150);
+  }
+
+  // Load Table of Contents on open
+  if (bookIndex.length === 0) {
+    if (bookMode === 'pdf') {
+      loadPDFOutline();
+    } else {
+      loadWebPOTOC(currentMeta);
+    }
   }
 }
 
@@ -660,14 +685,76 @@ function closeSidePanel() {
 }
 
 btnToc.addEventListener('click', () => {
-  if (sidePanel.classList.contains('active')) {
+  if (sidePanel.classList.contains('active') && sectionToc.classList.contains('active')) {
     closeSidePanel();
   } else {
-    openSidePanel();
+    openSidePanel('toc');
+  }
+});
+
+btnSearch.addEventListener('click', () => {
+  if (sidePanel.classList.contains('active') && sectionSearch.classList.contains('active')) {
+    closeSidePanel();
+  } else {
+    openSidePanel('search');
   }
 });
 
 btnPanelClose.addEventListener('click', closeSidePanel);
+
+// Tab switching
+tabToc.addEventListener('click', () => openSidePanel('toc'));
+tabSearch.addEventListener('click', () => openSidePanel('search'));
+
+// Search trigger
+btnSearchTrigger.addEventListener('click', doSearch);
+searchBoxInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') doSearch();
+  else if (e.key === 'Escape') closeSidePanel();
+});
+searchBoxInput.addEventListener('input', doSearch); // Real-time search as they type!
+
+function doSearch() {
+  const query = searchBoxInput.value.trim().toLowerCase();
+  searchResultsList.innerHTML = '';
+
+  if (!query) {
+    searchResultsList.innerHTML = '<div class="text-sm text-muted">Type a word to search index names.</div>';
+    return;
+  }
+
+  const results = bookIndex.filter(item => item.title.toLowerCase().includes(query));
+
+  if (results.length === 0) {
+    searchResultsList.innerHTML = '<div class="text-sm text-muted">No matching index items found.</div>';
+    return;
+  }
+
+  results.forEach(result => {
+    const btn = document.createElement('button');
+    btn.className = 'search-result-item';
+    
+    // Highlight matching query
+    const regex = new RegExp(`(${escapeRegExp(query)})`, 'gi');
+    const highlightedTitle = result.title.replace(regex, '<mark>$1</mark>');
+
+    btn.innerHTML = `
+      <div class="search-result-header" style="margin-bottom: 0;">
+        <span class="chapter-title">${highlightedTitle}</span>
+        <span class="chapter-page">Page ${result.page}</span>
+      </div>
+    `;
+    btn.addEventListener('click', () => {
+      pageFlip?.flip(result.page - 1);
+      closeSidePanel();
+    });
+    searchResultsList.appendChild(btn);
+  });
+}
+
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 // ─── TOC / Index loaders ──────────────────────────────────────────────────
 
@@ -677,6 +764,7 @@ async function loadPDFOutline() {
     const outline = await pdfDoc.getOutline();
     if (!outline || outline.length === 0) {
       tocList.innerHTML = '<div class="text-sm text-muted">No index bookmarks found.</div>';
+      bookIndex = [];
       return;
     }
 
@@ -704,6 +792,8 @@ async function loadPDFOutline() {
     );
 
     const validItems = items.filter(i => i.page !== null);
+    bookIndex = validItems;
+
     if (validItems.length === 0) {
       tocList.innerHTML = '<div class="text-sm text-muted">No index bookmarks found.</div>';
     } else {
@@ -711,12 +801,14 @@ async function loadPDFOutline() {
     }
   } catch (err) {
     tocList.innerHTML = '<div class="text-sm text-muted">No index bookmarks found.</div>';
+    bookIndex = [];
   }
 }
 
 function loadWebPOTOC(meta) {
-  if (meta && meta.index && meta.index.length > 0) {
-    renderTOC(meta.index);
+  bookIndex = meta && meta.index ? meta.index : [];
+  if (bookIndex.length > 0) {
+    renderTOC(bookIndex);
   } else {
     tocList.innerHTML = '<div class="text-sm text-muted">No index bookmarks found.</div>';
   }
