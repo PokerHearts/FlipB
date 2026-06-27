@@ -35,12 +35,13 @@ const viewerPage     = document.getElementById('viewer-page');
 
 // ─── State ────────────────────────────────────────────────────────────────
 
-let pageFlip    = null;
-let pdfDoc      = null;
-let totalPages  = 0;
-let zoomLevel   = 1;
-let pageURLs    = [];     // rendered blob URLs per page
-let rendering   = {};     // track in-progress renders
+let pageFlip       = null;
+let pdfDoc         = null;
+let totalPages     = 0;
+let zoomLevel      = 1;
+let pageURLs       = [];     // rendered blob URLs per page
+let rendering      = {};     // track in-progress renders
+let isLandscapePDF = false;  // automatically locks landscape view
 
 const RENDER_SCALE   = 3.0; // 3.0x scale for crisp Retina quality
 const PREFETCH_AHEAD = 3;
@@ -136,16 +137,19 @@ async function buildFlipbook() {
   const ratio     = srcH / srcW;
   firstPage.cleanup();
 
+  isLandscapePDF = srcW > srcH;
+
   // Stage dimensions
   const stageW = flipbookWrap.clientWidth  - 16;
   const stageH = flipbookWrap.clientHeight - 16;
 
   let pageW, pageH;
   const isMobile = window.innerWidth < 640;
+  const useSinglePage = isMobile || isLandscapePDF;
 
-  if (isMobile) {
-    // Single page on mobile: fit width, clamp height
-    pageW = Math.min(stageW - 16, 500);
+  if (useSinglePage) {
+    // Single page mode: fit width, clamp height to stage
+    pageW = stageW - 16;
     pageH = Math.round(pageW * ratio);
     if (pageH > stageH - 16) {
       pageH = stageH - 16;
@@ -196,15 +200,15 @@ async function buildFlipbook() {
     width:      pageW,
     height:     pageH,
     size:       'fixed',
-    minWidth:   isMobile ? pageW : pageW * 2,
-    maxWidth:   isMobile ? pageW : pageW * 2,
+    minWidth:   useSinglePage ? pageW : pageW * 2,
+    maxWidth:   useSinglePage ? pageW : pageW * 2,
     minHeight:  pageH,
     maxHeight:  pageH,
     maxShadowOpacity: 0.5,
-    showCover:  true,
+    showCover:  !useSinglePage,
     mobileScrollSupport: true,
     swipeDistance: 30,
-    usePortrait: isMobile,
+    usePortrait: useSinglePage,
     autoSize:    false,
   });
 
@@ -357,12 +361,24 @@ function toggleFullscreen() {
   }
 }
 
-document.addEventListener('fullscreenchange', () => {
+document.addEventListener('fullscreenchange', async () => {
   const icon = btnFullscreen.querySelector('svg');
   if (document.fullscreenElement) {
     icon.innerHTML = exitFsIcon();
+    if (isLandscapePDF && screen.orientation && screen.orientation.lock) {
+      try {
+        await screen.orientation.lock('landscape');
+      } catch (err) {
+        console.warn('Orientation lock failed:', err);
+      }
+    }
   } else {
     icon.innerHTML = enterFsIcon();
+    if (screen.orientation && screen.orientation.unlock) {
+      try {
+        screen.orientation.unlock();
+      } catch (err) {}
+    }
   }
 });
 
