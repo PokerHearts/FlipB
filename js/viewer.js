@@ -9,7 +9,7 @@
  *   viewer.html?book=chemistry           ← looks up in books.json
  */
 
-import { getParam, applyTheme, getTheme, toggleTheme } from './modules/utils.js';
+import { getParam, applyTheme, getTheme, toggleTheme, debounce } from './modules/utils.js';
 import { toastError } from './modules/toast.js';
 
 // ─── DOM refs ─────────────────────────────────────────────────────────────
@@ -18,7 +18,8 @@ const loadingScreen  = document.getElementById('viewer-loading');
 const loadingText    = document.getElementById('loading-text');
 const flipbookEl     = document.getElementById('flipbook');
 const flipbookWrap   = document.getElementById('flipbook-container');
-const pageCounter    = document.getElementById('page-counter');
+const pageInput      = document.getElementById('page-input');
+const pageTotal      = document.getElementById('page-total');
 const progressBar    = document.getElementById('viewer-progress');
 const btnPrev        = document.getElementById('btn-prev');
 const btnNext        = document.getElementById('btn-next');
@@ -44,6 +45,8 @@ let rendering      = {};     // track in-progress renders
 let isLandscapePDF = false;  // automatically locks landscape view
 let bookMode       = 'pdf';  // 'pdf' or 'webp'
 let bookBaseURL    = '';     // base URL for WebP images folder
+let currentMeta    = null;
+let isRebuilding   = false;
 
 const RENDER_SCALE   = 3.0; // 3.0x scale for crisp Retina quality
 const PREFETCH_AHEAD = 3;
@@ -156,6 +159,7 @@ async function initWebP(path) {
     const res = await fetch(`${bookBaseURL}/meta.json`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const meta = await res.json();
+    currentMeta = meta;
 
     document.title = `${meta.title || 'Book'} — Flipbook`;
     navTitle.textContent  = meta.title || 'Book';
@@ -186,8 +190,7 @@ async function buildFlipbookPDF() {
   const stageH = flipbookWrap.clientHeight - 16;
 
   let pageW, pageH;
-  const isMobile = window.innerWidth < 640;
-  const useSinglePage = isMobile;
+  const useSinglePage = window.innerWidth < window.innerHeight;
 
   if (useSinglePage) {
     // Single page mode: fit width, clamp height to stage
@@ -265,11 +268,10 @@ async function buildFlipbookPDF() {
     if (e.data === 'read') prefetchAround(pageFlip.getCurrentPageIndex());
   });
 
-  // Hide loading, start prefetch
+  // Hide loading, start initial page routing
   setTimeout(() => {
     loadingScreen.classList.add('hidden');
-    updatePageUI(0);
-    prefetchAround(0);
+    startInitialPage();
   }, 300);
 
   // Controls
@@ -312,8 +314,7 @@ async function buildFlipbookWebP(meta) {
   const stageH = flipbookWrap.clientHeight - 16;
 
   let pageW, pageH;
-  const isMobile = window.innerWidth < 640;
-  const useSinglePage = isMobile;
+  const useSinglePage = window.innerWidth < window.innerHeight;
 
   if (useSinglePage) {
     pageW = stageW - 16;
@@ -382,11 +383,10 @@ async function buildFlipbookWebP(meta) {
     if (e.data === 'read') prefetchAround(pageFlip.getCurrentPageIndex());
   });
 
-  // Hide loading, start prefetch
+  // Hide loading, start initial page routing
   setTimeout(() => {
     loadingScreen.classList.add('hidden');
-    updatePageUI(0);
-    prefetchAround(0);
+    startInitialPage();
   }, 300);
 
   // Controls
@@ -453,9 +453,16 @@ async function prefetchAround(pageIndex) {
 
 function updatePageUI(pageIndex) {
   const current = pageIndex + 1;
-  pageCounter.textContent = `${current} / ${totalPages}`;
+  if (pageInput) pageInput.value = current;
+  if (pageTotal) pageTotal.textContent = totalPages;
+
   const pct = (pageIndex / Math.max(1, totalPages - 1)) * 100;
   progressBar.style.width = `${pct}%`;
+
+  // Update URL hash with page number for sharing/linking
+  const url = new URL(window.location.href);
+  url.hash = `page=${current}`;
+  window.history.replaceState(null, '', url.toString());
 }
 
 // ─── Controls ─────────────────────────────────────────────────────────────
@@ -467,6 +474,15 @@ document.getElementById('btn-first').addEventListener('click', () => pageFlip?.f
 document.getElementById('btn-last').addEventListener('click',  () => pageFlip?.flip(totalPages - 1));
 
 btnFullscreen.addEventListener('click', toggleFullscreen);
+
+if (pageInput) {
+  pageInput.addEventListener('change', e => {
+    let val = parseInt(e.target.value, 10);
+    if (isNaN(val)) return;
+    val = Math.max(1, Math.min(totalPages, val));
+    pageFlip?.flip(val - 1);
+  });
+}
 
 btnZoomIn.addEventListener('click',  () => adjustZoom(0.25));
 btnZoomOut.addEventListener('click', () => adjustZoom(-0.25));
@@ -553,6 +569,16 @@ document.addEventListener('fullscreenchange', async () => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
+function startInitialPage() {
+  let startPage = parseInt(getParam('page') || getParam('index') || window.location.hash.replace('#page=', '').replace('#index=', ''), 10);
+  if (!isNaN(startPage) && startPage >= 1 && startPage <= totalPages) {
+    pageFlip?.flip(startPage - 1);
+  } else {
+    updatePageUI(0);
+    prefetchAround(0);
+  }
+}
+
 function makeBlankDataURL() {
   return 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 }
@@ -576,6 +602,37 @@ function exitFsIcon() {
     d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>`;
 }
 
-window.addEventListener('resize', () => {
-  pageFlip?.update();
-});
+async function handleResize() {
+  if (isRebuilding || !pageFlip) return;
+
+  const isCurrentlyPortrait = window.innerWidth < window.innerHeight;
+  const isBookPortrait = pageFlip.getOrientation() === 'portrait';
+
+  if (isCurrentlyPortrait === isBookPortrait) {
+    // Sizing change only, orientation didn't swap
+    pageFlip.update();
+    return;
+  }
+
+  isRebuilding = true;
+  const currentPageIndex = pageFlip.getCurrentPageIndex();
+
+  try {
+    pageFlip.destroy();
+    pageFlip = null;
+
+    if (bookMode === 'pdf') {
+      await buildFlipbookPDF();
+    } else {
+      await buildFlipbookWebP(currentMeta);
+    }
+
+    // Restore book position
+    pageFlip.flip(currentPageIndex);
+  } catch (err) {
+    console.warn('Rebuilding flipbook failed:', err);
+  }
+  isRebuilding = false;
+}
+
+window.addEventListener('resize', debounce(handleResize, 150));

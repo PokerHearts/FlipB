@@ -146,6 +146,38 @@
   color: var(--text-secondary);
   min-width: 80px;
   text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+#page-input {
+  width: 42px;
+  background: var(--bg-input, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  color: var(--text, white);
+  text-align: center;
+  font-size: 0.825rem;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-weight: 600;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+#page-input:focus {
+  border-color: var(--accent);
+}
+
+#page-input::-webkit-outer-spin-button,
+#page-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+#page-input {
+  -moz-appearance: textfield;
 }
 
 .viewer-progress-wrap {
