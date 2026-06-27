@@ -35,17 +35,9 @@ const zoomImg        = document.getElementById('zoom-img');
 const viewerPage     = document.getElementById('viewer-page');
 
 const btnToc            = document.getElementById('btn-toc');
-const btnSearch         = document.getElementById('btn-search');
 const sidePanel         = document.getElementById('side-panel');
 const btnPanelClose     = document.getElementById('btn-panel-close');
-const tabToc            = document.getElementById('tab-toc');
-const tabSearch         = document.getElementById('tab-search');
-const sectionToc        = document.getElementById('section-toc');
-const sectionSearch     = document.getElementById('section-search');
 const tocList           = document.getElementById('toc-list');
-const searchBoxInput    = document.getElementById('search-box-input');
-const btnSearchTrigger  = document.getElementById('btn-search-trigger');
-const searchResultsList = document.getElementById('search-results-list');
 
 // ─── State ────────────────────────────────────────────────────────────────
 
@@ -60,9 +52,6 @@ let bookMode       = 'pdf';  // 'pdf' or 'webp'
 let bookBaseURL    = '';     // base URL for WebP images folder
 let currentMeta    = null;
 let isRebuilding   = false;
-let resolvedOutline = [];    // cache for TOC bookmarks
-let searchIndexData = null;  // full text search cache
-let searchLoading   = false;
 
 const RENDER_SCALE   = 3.0; // 3.0x scale for crisp Retina quality
 const PREFETCH_AHEAD = 3;
@@ -586,23 +575,10 @@ document.addEventListener('fullscreenchange', async () => {
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 function startInitialPage() {
-  try {
-    let startPage = parseInt(getParam('page') || getParam('index') || window.location.hash.replace('#page=', '').replace('#index=', ''), 10);
-    if (!isNaN(startPage) && startPage > 1 && startPage <= totalPages) {
-      updatePageUI(startPage - 1);
-      setTimeout(() => {
-        try {
-          pageFlip?.flip(startPage - 1);
-        } catch (e) {
-          console.warn('Initial flip failed:', e);
-        }
-      }, 50);
-    } else {
-      updatePageUI(0);
-      prefetchAround(0);
-    }
-  } catch (err) {
-    console.error('Error starting initial page:', err);
+  let startPage = parseInt(getParam('page') || getParam('index') || window.location.hash.replace('#page=', '').replace('#index=', ''), 10);
+  if (!isNaN(startPage) && startPage >= 1 && startPage <= totalPages) {
+    pageFlip?.flip(startPage - 1);
+  } else {
     updatePageUI(0);
     prefetchAround(0);
   }
@@ -666,96 +642,36 @@ async function handleResize() {
 
 window.addEventListener('resize', debounce(handleResize, 150));
 
-// ─── Side Panel (Index & Search) ──────────────────────────────────────
+// ─── Side Panel (Index) ───────────────────────────────────────────────────
 
-function openSidePanel(activeTab = 'toc') {
-  if (!sidePanel) return;
+function openSidePanel() {
   sidePanel.classList.add('active');
-
-  if (activeTab === 'toc') {
-    if (tabToc) tabToc.classList.add('active');
-    if (tabSearch) tabSearch.classList.remove('active');
-    if (sectionToc) sectionToc.classList.add('active');
-    if (sectionSearch) sectionSearch.classList.remove('active');
-    
-    // Load Table of Contents
-    if (bookMode === 'pdf') {
-      loadPDFOutline();
-    } else {
-      loadWebPOTOC(currentMeta);
-    }
+  
+  // Load Table of Contents
+  if (bookMode === 'pdf') {
+    loadPDFOutline();
   } else {
-    if (tabToc) tabToc.classList.remove('active');
-    if (tabSearch) tabSearch.classList.add('active');
-    if (sectionToc) sectionToc.classList.remove('active');
-    if (sectionSearch) sectionSearch.classList.add('active');
-    if (searchBoxInput) setTimeout(() => searchBoxInput.focus(), 150);
+    loadWebPOTOC(currentMeta);
   }
 }
 
 function closeSidePanel() {
-  if (sidePanel) sidePanel.classList.remove('active');
+  sidePanel.classList.remove('active');
 }
 
-if (btnToc) {
-  btnToc.addEventListener('click', () => {
-    if (sidePanel && sidePanel.classList.contains('active') && sectionToc && sectionToc.classList.contains('active')) {
-      closeSidePanel();
-    } else {
-      openSidePanel('toc');
-    }
-  });
-}
-
-if (btnSearch) {
-  btnSearch.addEventListener('click', () => {
-    if (sidePanel && sidePanel.classList.contains('active') && sectionSearch && sectionSearch.classList.contains('active')) {
-      closeSidePanel();
-    } else {
-      openSidePanel('search');
-    }
-  });
-}
-
-if (btnPanelClose) {
-  btnPanelClose.addEventListener('click', closeSidePanel);
-}
-
-// Tab switching
-if (tabToc) {
-  tabToc.addEventListener('click', () => openSidePanel('toc'));
-}
-if (tabSearch) {
-  tabSearch.addEventListener('click', () => openSidePanel('search'));
-}
-
-// Search trigger
-if (btnSearchTrigger) {
-  btnSearchTrigger.addEventListener('click', doSearch);
-}
-if (searchBoxInput) {
-  searchBoxInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter') doSearch();
-  });
-}
-
-function doSearch() {
-  const query = searchBoxInput.value.trim();
-  if (!query) return;
-  if (bookMode === 'pdf') {
-    searchPDF(query);
+btnToc.addEventListener('click', () => {
+  if (sidePanel.classList.contains('active')) {
+    closeSidePanel();
   } else {
-    searchWebP(query);
+    openSidePanel();
   }
-}
+});
+
+btnPanelClose.addEventListener('click', closeSidePanel);
 
 // ─── TOC / Index loaders ──────────────────────────────────────────────────
 
 async function loadPDFOutline() {
-  if (resolvedOutline.length > 0) {
-    renderTOC(resolvedOutline);
-    return;
-  }
   tocList.innerHTML = '<div class="text-sm text-muted">Loading outline…</div>';
   try {
     const outline = await pdfDoc.getOutline();
@@ -787,11 +703,11 @@ async function loadPDFOutline() {
       })
     );
 
-    resolvedOutline = items.filter(i => i.page !== null);
-    if (resolvedOutline.length === 0) {
+    const validItems = items.filter(i => i.page !== null);
+    if (validItems.length === 0) {
       tocList.innerHTML = '<div class="text-sm text-muted">No index bookmarks found.</div>';
     } else {
-      renderTOC(resolvedOutline);
+      renderTOC(validItems);
     }
   } catch (err) {
     tocList.innerHTML = '<div class="text-sm text-muted">No index bookmarks found.</div>';
@@ -821,83 +737,4 @@ function renderTOC(items) {
     });
     tocList.appendChild(btn);
   });
-}
-
-// ─── Search implementation ────────────────────────────────────────────────
-
-function doSearch() {
-  const query = searchBoxInput.value.trim();
-  if (!query) {
-    searchResultsList.innerHTML = '<div class="text-sm text-muted">Type a word to search the pages.</div>';
-    return;
-  }
-
-  searchResultsList.innerHTML = '<div class="text-sm text-muted">Searching index…</div>';
-  
-  // Get source list
-  let sourceList = [];
-  if (bookMode === 'pdf') {
-    sourceList = resolvedOutline;
-  } else {
-    sourceList = (currentMeta && currentMeta.index) ? currentMeta.index : [];
-  }
-
-  const queryWords = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (queryWords.length === 0) {
-    searchResultsList.innerHTML = '<div class="text-sm text-muted">Type a word to search.</div>';
-    return;
-  }
-
-  const results = [];
-  sourceList.forEach(item => {
-    const title = item.title || '';
-    const lowercaseTitle = title.toLowerCase();
-    
-    // Check if ALL query words are found in the chapter title (wildcard match)
-    const isMatch = queryWords.every(word => lowercaseTitle.includes(word));
-    
-    if (isMatch) {
-      // Highlight matching words in the title
-      let highlightedTitle = title;
-      queryWords.forEach(word => {
-        const regex = new RegExp(`(${escapeRegExp(word)})`, 'gi');
-        highlightedTitle = highlightedTitle.replace(regex, '<mark>$1</mark>');
-      });
-
-      results.push({
-        title: highlightedTitle,
-        page: item.page
-      });
-    }
-  });
-
-  renderSearchResults(results);
-}
-
-function renderSearchResults(results) {
-  searchResultsList.innerHTML = '';
-  if (results.length === 0) {
-    searchResultsList.innerHTML = '<div class="text-sm text-muted">No matching chapters found in the index.</div>';
-    return;
-  }
-
-  results.forEach(result => {
-    const btn = document.createElement('button');
-    btn.className = 'search-result-item';
-    btn.innerHTML = `
-      <div class="search-result-header" style="margin-bottom: 0;">
-        <span class="chapter-title" style="font-weight: 500;">${result.title}</span>
-        <span class="chapter-page">Page ${result.page}</span>
-      </div>
-    `;
-    btn.addEventListener('click', () => {
-      pageFlip?.flip(result.page - 1);
-      closeSidePanel();
-    });
-    searchResultsList.appendChild(btn);
-  });
-}
-
-function escapeRegExp(string) {
-  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

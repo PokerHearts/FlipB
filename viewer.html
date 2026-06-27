@@ -41,16 +41,11 @@
       </div>
     </div>
     <div class="viewer-nav-right">
-      <!-- Index & Search -->
+      <!-- Index -->
       <button class="btn-icon" id="btn-toc" aria-label="Table of Contents" title="Table of Contents">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
           <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-        </svg>
-      </button>
-      <button class="btn-icon" id="btn-search" aria-label="Search Book" title="Search Book">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
       </button>
       <div class="viewer-divider" aria-hidden="true"></div>
@@ -180,32 +175,9 @@
       </button>
     </div>
     
-    <div class="side-panel-tabs">
-      <button class="side-panel-tab active" id="tab-toc" data-target="section-toc">Index</button>
-      <button class="side-panel-tab" id="tab-search" data-target="section-search">Search</button>
-    </div>
-    
     <div class="side-panel-content">
-      <!-- TOC Section -->
-      <div id="section-toc" class="side-panel-section active">
-        <div id="toc-list" class="chapter-list">
-          <div class="text-sm text-muted">No index available.</div>
-        </div>
-      </div>
-      
-      <!-- Search Section -->
-      <div id="section-search" class="side-panel-section">
-        <div class="search-box-wrap">
-          <input type="text" id="search-box-input" class="search-input-field" placeholder="Search for text...">
-          <button class="btn-icon" id="btn-search-trigger" aria-label="Perform search" title="Search">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
-              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-            </svg>
-          </button>
-        </div>
-        <div id="search-results-list" class="search-results">
-          <div class="text-sm text-muted">Type a word to search the pages.</div>
-        </div>
+      <div id="toc-list" class="chapter-list">
+        <div class="text-sm text-muted">No index available.</div>
       </div>
     </div>
   </aside>
