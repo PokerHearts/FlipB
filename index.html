@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Flipbook Library</title>
+  <meta name="description" content="Your personal flipbook library — publish and read beautiful digital books."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"/>
+  <link rel="stylesheet" href="css/main.css"/>
+  <style>
+    .library-header {
+      padding: 40px 0 28px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 28px;
+    }
+    .library-header-inner {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .library-header h1 {
+      font-size: clamp(1.5rem, 3vw, 2rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 2px;
+    }
+    .library-header p {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+    }
+    #book-count {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Navigation -->
+<nav class="nav" role="navigation" aria-label="Main navigation">
+  <div class="container nav-inner">
+    <a href="index.html" class="nav-logo" aria-label="Flipbook home">
+      <div class="nav-logo-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+      </div>
+      Flipbook
+    </a>
+    <div class="nav-actions">
+      <a href="index.html"  class="nav-link active" aria-current="page">Library</a>
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <div class="container">
+
+    <div class="library-header">
+      <div class="library-header-inner">
+        <div>
+          <h1>Your Library</h1>
+          <p>All published flipbooks in one place.</p>
+        </div>
+        <span id="book-count" aria-live="polite">0 books</span>
+      </div>
+    </div>
+
+    <!-- Search + Filter -->
+    <div class="search-filter-bar" role="search">
+      <div class="search-wrap">
+        <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+        </svg>
+        <input type="search"
+               id="search-input"
+               class="search-input"
+               placeholder="Search by title, author…"
+               autocomplete="off"
+               aria-label="Search books"/>
+      </div>
+      <div class="filter-chips" id="filter-chips" role="group" aria-label="Filter by category"></div>
+    </div>
+
+    <!-- Books Grid -->
+    <div id="books-grid" class="books-grid" role="list" aria-label="Books"></div>
+
+    <!-- Empty State -->
+    <div id="empty-state" class="empty-state hidden" aria-live="polite">
+      <div class="empty-state-icon" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        </svg>
+      </div>
+      <h3>No books found</h3>
+      <p>Put your PDF files into the <code>PDFs/</code> folder of your repository, push to GitHub, and they will automatically appear here!</p>
+    </div>
+
+  </div>
+</main>
+
+<script type="module" src="js/library.js"></script>
+</body>
+</html>

@@ -1,0 +1,350 @@
+/**
+ * viewer.js – Controller for viewer.html
+ *
+ * Loads a PDF directly from the PDFs/ folder using PDF.js and renders
+ * pages on-the-fly into StPageFlip. No pre-rendering, no IndexedDB.
+ *
+ * Usage:
+ *   viewer.html?pdf=chemistry.pdf        ← direct PDF filename
+ *   viewer.html?book=chemistry           ← looks up in books.json
+ */
+
+import { getParam, applyTheme, getTheme, toggleTheme } from './modules/utils.js';
+import { toastError } from './modules/toast.js';
+
+// ─── DOM refs ─────────────────────────────────────────────────────────────
+
+const loadingScreen  = document.getElementById('viewer-loading');
+const loadingText    = document.getElementById('loading-text');
+const flipbookEl     = document.getElementById('flipbook');
+const flipbookWrap   = document.getElementById('flipbook-container');
+const pageCounter    = document.getElementById('page-counter');
+const progressBar    = document.getElementById('viewer-progress');
+const btnPrev        = document.getElementById('btn-prev');
+const btnNext        = document.getElementById('btn-next');
+const btnFullscreen  = document.getElementById('btn-fullscreen');
+const btnZoomIn      = document.getElementById('btn-zoom-in');
+const btnZoomOut     = document.getElementById('btn-zoom-out');
+const zoomLabel      = document.getElementById('zoom-label');
+const themeToggle    = document.getElementById('theme-toggle');
+const navTitle       = document.getElementById('nav-title');
+const navAuthor      = document.getElementById('nav-author');
+const zoomOverlay    = document.getElementById('zoom-overlay');
+const zoomImg        = document.getElementById('zoom-img');
+const viewerPage     = document.getElementById('viewer-page');
+
+// ─── State ────────────────────────────────────────────────────────────────
+
+let pageFlip    = null;
+let pdfDoc      = null;
+let totalPages  = 0;
+let zoomLevel   = 1;
+let pageURLs    = [];     // rendered blob URLs per page
+let rendering   = {};     // track in-progress renders
+
+const RENDER_SCALE   = 1.8;
+const PREFETCH_AHEAD = 3;
+
+// ─── Init ─────────────────────────────────────────────────────────────────
+
+applyTheme(getTheme());
+themeToggle.addEventListener('click', () => toggleTheme());
+
+// Determine PDF to load
+const pdfParam  = getParam('pdf');
+const bookParam = getParam('book');
+
+if (pdfParam) {
+  init(pdfParam, pdfParam.replace(/\.pdf$/i, ''));
+} else if (bookParam) {
+  initFromCatalog(bookParam);
+} else {
+  showError('No book specified. Use ?pdf=filename.pdf or ?book=slug');
+}
+
+// ─── Security ─────────────────────────────────────────────────────────────
+
+document.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('dragstart',   e => e.preventDefault());
+document.addEventListener('selectstart', e => { if (!isInput(e.target)) e.preventDefault(); });
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && ['s','p','u'].includes(e.key.toLowerCase())) e.preventDefault();
+});
+
+function isInput(el) {
+  return el.matches('input, textarea, [contenteditable]');
+}
+
+// ─── Catalog lookup ───────────────────────────────────────────────────────
+
+async function initFromCatalog(slug) {
+  setLoadingText('Looking up book…');
+  try {
+    const res = await fetch('books.json');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const catalog = await res.json();
+    const entry = catalog.find(b => b.slug === slug);
+    if (!entry) throw new Error('Not in catalog');
+
+    const pdfFile = entry.file || `${slug}.pdf`;
+    init(pdfFile, entry.title || slug, entry.author);
+  } catch {
+    // Fallback: try loading slug.pdf directly
+    init(`${slug}.pdf`, slug);
+  }
+}
+
+// ─── Main init ────────────────────────────────────────────────────────────
+
+async function init(pdfFilename, title, author) {
+  setLoadingText('Loading PDF…');
+
+  const pdfPath = (pdfFilename.toLowerCase().startsWith('pdfs/') || pdfFilename.toLowerCase().startsWith('pdf/'))
+    ? pdfFilename
+    : `PDFs/${pdfFilename}`;
+  document.title = `${title} — Flipbook`;
+  navTitle.textContent  = title;
+  navAuthor.textContent = author ? `by ${author}` : '';
+
+  // Configure PDF.js worker
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'libs/pdf.worker.min.js';
+
+  try {
+    pdfDoc = await pdfjsLib.getDocument(pdfPath).promise;
+  } catch (err) {
+    showError(`Could not load "${pdfFilename}". Make sure it exists in the PDFs/ folder.`);
+    return;
+  }
+
+  totalPages = pdfDoc.numPages;
+  setLoadingText(`Rendering ${totalPages} pages…`);
+
+  await buildFlipbook();
+}
+
+// ─── Build flipbook ───────────────────────────────────────────────────────
+
+async function buildFlipbook() {
+  // Get first page dimensions for sizing
+  const firstPage = await pdfDoc.getPage(1);
+  const vp        = firstPage.getViewport({ scale: RENDER_SCALE });
+  const srcW      = vp.width;
+  const srcH      = vp.height;
+  const ratio     = srcH / srcW;
+  firstPage.cleanup();
+
+  // Stage dimensions
+  const stageW = flipbookWrap.clientWidth  - 16;
+  const stageH = flipbookWrap.clientHeight - 16;
+
+  let pageW, pageH;
+  const isMobile = window.innerWidth < 640;
+
+  if (isMobile) {
+    pageW = Math.min(stageW - 8, 380);
+    pageH = Math.round(pageW * ratio);
+  } else {
+    const spreadW = Math.min(stageW, 1000);
+    pageW = Math.floor(spreadW / 2);
+    pageH = Math.min(Math.round(pageW * ratio), stageH - 8);
+    pageW = Math.round(pageH / ratio);
+  }
+
+  // Render first page immediately so viewer isn't blank
+  const firstURL = await renderPage(1);
+
+  // Build placeholder array — pages load on demand
+  const placeholder = makeBlankDataURL();
+  pageURLs = Array(totalPages).fill(placeholder);
+  pageURLs[0] = firstURL;
+
+  // Initialize StPageFlip
+  pageFlip = new St.PageFlip(flipbookEl, {
+    width:      pageW,
+    height:     pageH,
+    size:       'fixed',
+    minWidth:   isMobile ? pageW : pageW * 2,
+    maxWidth:   isMobile ? pageW : pageW * 2,
+    minHeight:  pageH,
+    maxHeight:  pageH,
+    maxShadowOpacity: 0.5,
+    showCover:  true,
+    mobileScrollSupport: true,
+    swipeDistance: 30,
+    usePortrait: isMobile,
+    autoSize:    false,
+  });
+
+  pageFlip.loadFromImages(pageURLs);
+
+  pageFlip.on('flip', e => {
+    updatePageUI(e.data);
+    prefetchAround(e.data);
+  });
+
+  pageFlip.on('changeState', e => {
+    if (e.data === 'read') prefetchAround(pageFlip.getCurrentPageIndex());
+  });
+
+  // Hide loading, start prefetch
+  setTimeout(() => {
+    loadingScreen.classList.add('hidden');
+    updatePageUI(0);
+    prefetchAround(0);
+  }, 300);
+
+  // Controls
+  document.addEventListener('keydown', onKeydown);
+  flipbookEl.addEventListener('dblclick', onDoubleClick);
+  zoomOverlay.addEventListener('click', () => zoomOverlay.classList.remove('active'));
+}
+
+// ─── Render a single PDF page to blob URL ─────────────────────────────────
+
+async function renderPage(pageNum) {
+  const page     = await pdfDoc.getPage(pageNum);
+  const viewport = page.getViewport({ scale: RENDER_SCALE });
+
+  const canvas  = document.createElement('canvas');
+  canvas.width  = viewport.width;
+  canvas.height = viewport.height;
+  const ctx     = canvas.getContext('2d');
+
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  page.cleanup();
+
+  return new Promise(resolve => {
+    canvas.toBlob(blob => {
+      resolve(URL.createObjectURL(blob));
+    }, 'image/webp', 0.85);
+  });
+}
+
+// ─── Prefetch pages around current spread ─────────────────────────────────
+
+async function prefetchAround(pageIndex) {
+  const start = Math.max(0, pageIndex - 1);
+  const end   = Math.min(totalPages - 1, pageIndex + PREFETCH_AHEAD);
+  let changed = false;
+
+  for (let i = start; i <= end; i++) {
+    if (!pageURLs[i].startsWith('data:')) continue; // already rendered
+    if (rendering[i]) continue; // already in progress
+
+    rendering[i] = true;
+    try {
+      pageURLs[i] = await renderPage(i + 1); // PDF.js is 1-indexed
+      changed = true;
+    } catch {
+      // skip failed pages
+    }
+    rendering[i] = false;
+  }
+
+  if (changed && pageFlip) {
+    try { pageFlip.updateFromImages(pageURLs); } catch { /* swallow */ }
+  }
+}
+
+// ─── UI Updates ───────────────────────────────────────────────────────────
+
+function updatePageUI(pageIndex) {
+  const current = pageIndex + 1;
+  pageCounter.textContent = `${current} / ${totalPages}`;
+  const pct = (pageIndex / Math.max(1, totalPages - 1)) * 100;
+  progressBar.style.width = `${pct}%`;
+}
+
+// ─── Controls ─────────────────────────────────────────────────────────────
+
+btnPrev.addEventListener('click', () => pageFlip?.flipPrev());
+btnNext.addEventListener('click', () => pageFlip?.flipNext());
+
+document.getElementById('btn-first').addEventListener('click', () => pageFlip?.flip(0));
+document.getElementById('btn-last').addEventListener('click',  () => pageFlip?.flip(totalPages - 1));
+
+btnFullscreen.addEventListener('click', toggleFullscreen);
+
+btnZoomIn.addEventListener('click',  () => adjustZoom(0.25));
+btnZoomOut.addEventListener('click', () => adjustZoom(-0.25));
+
+function adjustZoom(delta) {
+  zoomLevel = Math.max(0.5, Math.min(2.5, zoomLevel + delta));
+  flipbookEl.style.transform = `scale(${zoomLevel})`;
+  flipbookEl.style.transformOrigin = 'center center';
+  zoomLabel.textContent = `${Math.round(zoomLevel * 100)}%`;
+}
+
+function onKeydown(e) {
+  if (!pageFlip) return;
+  switch (e.key) {
+    case 'ArrowRight': case 'ArrowDown': case 'PageDown':
+      pageFlip.flipNext(); break;
+    case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
+      pageFlip.flipPrev(); break;
+    case 'Home': pageFlip.flip(0); break;
+    case 'End':  pageFlip.flip(totalPages - 1); break;
+    case 'f': case 'F': toggleFullscreen(); break;
+    case '+': case '=': adjustZoom(0.25); break;
+    case '-': case '_': adjustZoom(-0.25); break;
+    case 'Escape': zoomOverlay.classList.remove('active'); break;
+  }
+}
+
+// ─── Double-click zoom ────────────────────────────────────────────────────
+
+async function onDoubleClick() {
+  const pageIndex = pageFlip?.getCurrentPageIndex() ?? 0;
+
+  // Ensure page is rendered
+  if (pageURLs[pageIndex].startsWith('data:')) {
+    pageURLs[pageIndex] = await renderPage(pageIndex + 1);
+  }
+
+  zoomImg.src = pageURLs[pageIndex];
+  zoomOverlay.classList.add('active');
+}
+
+// ─── Fullscreen ───────────────────────────────────────────────────────────
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    viewerPage.requestFullscreen?.() || viewerPage.webkitRequestFullscreen?.();
+  } else {
+    document.exitFullscreen?.() || document.webkitExitFullscreen?.();
+  }
+}
+
+document.addEventListener('fullscreenchange', () => {
+  const icon = btnFullscreen.querySelector('svg');
+  if (document.fullscreenElement) {
+    icon.innerHTML = exitFsIcon();
+  } else {
+    icon.innerHTML = enterFsIcon();
+  }
+});
+
+// ─── Helpers ──────────────────────────────────────────────────────────────
+
+function makeBlankDataURL() {
+  return 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+}
+
+function showError(msg) {
+  loadingText.textContent = msg;
+  loadingScreen.classList.remove('hidden');
+  document.querySelector('.loader-ring').style.display = 'none';
+  toastError(msg);
+}
+
+function setLoadingText(msg) { loadingText.textContent = msg; }
+
+function enterFsIcon() {
+  return `<path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+    d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>`;
+}
+
+function exitFsIcon() {
+  return `<path stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+    d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>`;
+}

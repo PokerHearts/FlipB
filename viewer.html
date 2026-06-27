@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Viewer — Flipbook</title>
+  <meta name="description" content="Read your flipbook."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"/>
+  <link rel="stylesheet" href="css/main.css"/>
+  <link rel="stylesheet" href="css/viewer.css"/>
+  <!-- PDF.js for direct PDF rendering -->
+  <script src="libs/pdf.min.js"></script>
+  <!-- StPageFlip must expose St.PageFlip on globalThis -->
+  <script src="libs/page-flip.js"></script>
+  <script>
+    // StPageFlip browser bundle exports to window.St
+    // Some versions export directly as PageFlip — normalise here.
+    if (typeof window.St === 'undefined' && typeof window.PageFlip !== 'undefined') {
+      window.St = { PageFlip: window.PageFlip };
+    }
+  </script>
+</head>
+<body>
+
+<div class="viewer-page" id="viewer-page">
+
+  <!-- Top Navigation Bar -->
+  <header class="viewer-nav" role="banner">
+    <div class="viewer-nav-left">
+      <a href="index.html" class="btn-icon" aria-label="Back to Library" title="Back to Library">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+      </a>
+      <div class="viewer-divider" aria-hidden="true"></div>
+      <div>
+        <div class="viewer-book-title" id="nav-title">Loading…</div>
+        <div class="viewer-book-author" id="nav-author"></div>
+      </div>
+    </div>
+    <div class="viewer-nav-right">
+      <!-- Zoom controls -->
+      <button class="btn-icon" id="btn-zoom-out" aria-label="Zoom out" title="Zoom out (-)">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          <line x1="8" y1="11" x2="14" y2="11"/>
+        </svg>
+      </button>
+      <span class="zoom-indicator" id="zoom-label" aria-live="polite">100%</span>
+      <button class="btn-icon" id="btn-zoom-in" aria-label="Zoom in" title="Zoom in (+)">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          <line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/>
+        </svg>
+      </button>
+
+      <div class="viewer-divider" aria-hidden="true"></div>
+
+      <!-- First / Last page -->
+      <button class="btn-icon" id="btn-first" aria-label="First page" title="First page (Home)">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/>
+        </svg>
+      </button>
+      <button class="btn-icon" id="btn-last" aria-label="Last page" title="Last page (End)">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/>
+        </svg>
+      </button>
+
+      <!-- Fullscreen -->
+      <button class="btn-icon" id="btn-fullscreen" aria-label="Toggle fullscreen" title="Fullscreen (F)">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-width="2">
+          <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"
+            d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+        </svg>
+      </button>
+
+      <!-- Dark mode -->
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Flipbook Stage -->
+  <main class="viewer-stage" role="main" aria-label="Flipbook reader">
+
+    <!-- Loading Overlay -->
+    <div id="viewer-loading" class="viewer-loading" role="status" aria-live="polite">
+      <div class="loader-ring" aria-hidden="true"></div>
+      <span class="loader-text" id="loading-text">Preparing your flipbook…</span>
+    </div>
+
+    <!-- Prev / Next nav arrows -->
+    <button class="page-nav-btn" id="btn-prev" aria-label="Previous page" title="Previous page (←)">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="15 18 9 12 15 6"/>
+      </svg>
+    </button>
+
+    <!-- The flipbook target element -->
+    <div id="flipbook-container" aria-hidden="true">
+      <div id="flipbook"></div>
+    </div>
+
+    <button class="page-nav-btn" id="btn-next" aria-label="Next page" title="Next page (→)">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="9 18 15 12 9 6"/>
+      </svg>
+    </button>
+
+    <!-- Double-click zoom overlay -->
+    <div id="zoom-overlay" class="zoom-overlay" role="dialog" aria-label="Zoomed page" aria-modal="true">
+      <div class="zoom-canvas-wrap">
+        <img id="zoom-img" alt="Zoomed page view" draggable="false"/>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Bottom Bar -->
+  <footer class="viewer-bottom" role="contentinfo">
+    <button class="btn-icon" id="btn-prev-foot" aria-label="Previous page" title="Previous (←)"
+            onclick="document.getElementById('btn-prev').click()">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="15 18 9 12 15 6"/>
+      </svg>
+    </button>
+
+    <span class="page-counter" id="page-counter" aria-live="polite" aria-atomic="true">— / —</span>
+
+    <div class="viewer-progress-wrap" role="progressbar" aria-label="Reading progress">
+      <div class="viewer-progress-bar" id="viewer-progress"></div>
+    </div>
+
+    <button class="btn-icon" id="btn-next-foot" aria-label="Next page" title="Next (→)"
+            onclick="document.getElementById('btn-next').click()">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="9 18 15 12 9 6"/>
+      </svg>
+    </button>
+  </footer>
+
+</div>
+
+<script type="module" src="js/viewer.js"></script>
+</body>
+</html>
