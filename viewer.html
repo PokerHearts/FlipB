@@ -58,18 +58,6 @@
 
       <div class="viewer-divider" aria-hidden="true"></div>
 
-      <!-- First / Last page -->
-      <button class="btn-icon" id="btn-first" aria-label="First page" title="First page (Home)">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/>
-        </svg>
-      </button>
-      <button class="btn-icon" id="btn-last" aria-label="Last page" title="Last page (End)">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/>
-        </svg>
-      </button>
-
       <!-- Fullscreen -->
       <button class="btn-icon" id="btn-fullscreen" aria-label="Toggle fullscreen" title="Fullscreen (F)">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke-width="2">
@@ -125,6 +113,12 @@
 
   <!-- Bottom Bar -->
   <footer class="viewer-bottom" role="contentinfo">
+    <button class="btn-icon" id="btn-first" aria-label="First page" title="First page (Home)">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/>
+      </svg>
+    </button>
+
     <button class="btn-icon" id="btn-prev-foot" aria-label="Previous page" title="Previous (←)"
             onclick="document.getElementById('btn-prev').click()">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -142,6 +136,12 @@
             onclick="document.getElementById('btn-next').click()">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <polyline points="9 18 15 12 9 6"/>
+      </svg>
+    </button>
+
+    <button class="btn-icon" id="btn-last" aria-label="Last page" title="Last page (End)">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/>
       </svg>
     </button>
   </footer>

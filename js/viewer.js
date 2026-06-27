@@ -42,7 +42,7 @@ let zoomLevel   = 1;
 let pageURLs    = [];     // rendered blob URLs per page
 let rendering   = {};     // track in-progress renders
 
-const RENDER_SCALE   = 1.8;
+const RENDER_SCALE   = 3.0; // 3.0x scale for crisp Retina quality
 const PREFETCH_AHEAD = 3;
 
 // ─── Init ─────────────────────────────────────────────────────────────────
@@ -141,13 +141,22 @@ async function buildFlipbook() {
   const isMobile = window.innerWidth < 640;
 
   if (isMobile) {
-    pageW = Math.min(stageW - 8, 380);
+    // Single page on mobile: fit width, clamp height
+    pageW = Math.min(stageW - 16, 500);
     pageH = Math.round(pageW * ratio);
+    if (pageH > stageH - 16) {
+      pageH = stageH - 16;
+      pageW = Math.round(pageH / ratio);
+    }
   } else {
-    const spreadW = Math.min(stageW, 1000);
-    pageW = Math.floor(spreadW / 2);
-    pageH = Math.min(Math.round(pageW * ratio), stageH - 8);
+    // Two-page spread: fit height, check width limit
+    pageH = stageH - 20;
     pageW = Math.round(pageH / ratio);
+
+    if (pageW * 2 > stageW - 20) {
+      pageW = Math.floor((stageW - 20) / 2);
+      pageH = Math.round(pageW * ratio);
+    }
   }
 
   // Render first page immediately so viewer isn't blank
@@ -216,7 +225,7 @@ async function renderPage(pageNum) {
   return new Promise(resolve => {
     canvas.toBlob(blob => {
       resolve(URL.createObjectURL(blob));
-    }, 'image/webp', 0.85);
+    }, 'image/webp', 0.95);
   });
 }
 
