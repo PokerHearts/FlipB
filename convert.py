@@ -44,20 +44,6 @@ def convert_pdf_to_webp(pdf_path, output_dir, dpi=150):
     except Exception as e:
         print(f"Could not extract table of contents: {e}")
 
-    # 2. Extract Full Text for search index
-    search_index = []
-    print("Extracting text for full-text search index...")
-    for page_num in range(len(doc)):
-        try:
-            page = doc.load_page(page_num)
-            text = page.get_text().strip()
-            search_index.append({
-                "page": page_num + 1,
-                "text": text
-            })
-        except Exception as e:
-            print(f"Error extracting text on page {page_num + 1}: {e}")
-
     # Generate metadata file
     meta = {
         "slug": book_slug,
@@ -70,10 +56,6 @@ def convert_pdf_to_webp(pdf_path, output_dir, dpi=150):
     
     with open(os.path.join(target_dir, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2, ensure_ascii=False)
-
-    # Save search index
-    with open(os.path.join(target_dir, "search_index.json"), "w", encoding="utf-8") as f:
-        json.dump(search_index, f, indent=2, ensure_ascii=False)
 
     print(f"\nDone! Output saved to: {target_dir}")
     print(f"\nNext Steps:\n1. Commit the newly generated folder to your GitHub repository.")
