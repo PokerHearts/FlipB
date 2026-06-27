@@ -57,6 +57,21 @@ def convert_pdf_to_webp(pdf_path, output_dir, dpi=150):
     with open(os.path.join(target_dir, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2, ensure_ascii=False)
 
+    # Generate search index file for full-text search
+    search_index = []
+    try:
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            text = page.get_text()
+            search_index.append({
+                "page": page_num + 1,
+                "text": text.strip()
+            })
+        with open(os.path.join(target_dir, "search_index.json"), "w", encoding="utf-8") as f:
+            json.dump(search_index, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Could not generate search index: {e}")
+
     print(f"\nDone! Output saved to: {target_dir}")
     print(f"\nNext Steps:\n1. Commit the newly generated folder to your GitHub repository.")
     print(f"2. Push to GitHub, and it will automatically go live on your website library!")

@@ -50,6 +50,7 @@ const searchResultsList = document.getElementById('search-results-list');
 // ─── State ────────────────────────────────────────────────────────────────
 
 let bookIndex      = [];     // Cache of chapters/outline bookmarks for searching
+let fullTextIndex  = null;   // Cache of full text pages for searching
 
 let pageFlip       = null;
 let pdfDoc         = null;
@@ -182,8 +183,22 @@ async function initWebP(path) {
     totalPages = meta.pages;
 
     await buildFlipbookWebP(meta);
+    loadFullTextIndex();
   } catch (err) {
     showError('Could not load book metadata. Make sure the files are uploaded and public.');
+  }
+}
+
+async function loadFullTextIndex() {
+  fullTextIndex = null;
+  if (bookMode !== 'webp') return;
+  try {
+    const res = await fetch(`${bookBaseURL}/search_index.json`);
+    if (res.ok) {
+      fullTextIndex = await res.json();
+    }
+  } catch (err) {
+    console.warn('Could not load search_index.json:', err);
   }
 }
 
@@ -714,42 +729,102 @@ searchBoxInput.addEventListener('keydown', e => {
 });
 searchBoxInput.addEventListener('input', doSearch); // Real-time search as they type!
 
+function getSnippet(text, query, maxLength = 80) {
+  const index = text.toLowerCase().indexOf(query);
+  if (index === -1) return text.substring(0, maxLength);
+  
+  const start = Math.max(0, index - Math.floor(maxLength / 2));
+  const end = Math.min(text.length, start + maxLength);
+  
+  let snippet = text.substring(start, end).replace(/\r?\n/g, ' ');
+  if (start > 0) snippet = '...' + snippet;
+  if (end < text.length) snippet = snippet + '...';
+  return snippet;
+}
+
 function doSearch() {
   const query = searchBoxInput.value.trim().toLowerCase();
   searchResultsList.innerHTML = '';
 
   if (!query) {
-    searchResultsList.innerHTML = '<div class="text-sm text-muted">Type a word to search index names.</div>';
+    searchResultsList.innerHTML = '<div class="text-sm text-muted">Type a word to search book content.</div>';
     return;
   }
 
-  const results = bookIndex.filter(item => item.title.toLowerCase().includes(query));
+  // 1. Search in TOC
+  const tocResults = bookIndex.filter(item => item.title.toLowerCase().includes(query));
 
-  if (results.length === 0) {
-    searchResultsList.innerHTML = '<div class="text-sm text-muted">No matching index items found.</div>';
-    return;
-  }
-
-  results.forEach(result => {
-    const btn = document.createElement('button');
-    btn.className = 'search-result-item';
-    
-    // Highlight matching query
-    const regex = new RegExp(`(${escapeRegExp(query)})`, 'gi');
-    const highlightedTitle = result.title.replace(regex, '<mark>$1</mark>');
-
-    btn.innerHTML = `
-      <div class="search-result-header" style="margin-bottom: 0;">
-        <span class="chapter-title">${highlightedTitle}</span>
-        <span class="chapter-page">Page ${result.page}</span>
-      </div>
-    `;
-    btn.addEventListener('click', () => {
-      pageFlip?.flip(result.page - 1);
-      closeSidePanel();
+  // 2. Search in Page Text (Full-Text)
+  const textResults = [];
+  if (fullTextIndex) {
+    fullTextIndex.forEach(item => {
+      if (item.text && item.text.toLowerCase().includes(query)) {
+        textResults.push({
+          page: item.page,
+          snippet: getSnippet(item.text, query)
+        });
+      }
     });
-    searchResultsList.appendChild(btn);
-  });
+  }
+
+  if (tocResults.length === 0 && textResults.length === 0) {
+    searchResultsList.innerHTML = '<div class="text-sm text-muted">No matching items found.</div>';
+    return;
+  }
+
+  const queryRegex = new RegExp(`(${escapeRegExp(query)})`, 'gi');
+
+  // Render TOC Results
+  if (tocResults.length > 0) {
+    const sectionTitle = document.createElement('div');
+    sectionTitle.className = 'search-section-title';
+    sectionTitle.textContent = 'Table of Contents';
+    searchResultsList.appendChild(sectionTitle);
+
+    tocResults.forEach(result => {
+      const btn = document.createElement('button');
+      btn.className = 'search-result-item';
+      const highlightedTitle = result.title.replace(queryRegex, '<mark>$1</mark>');
+
+      btn.innerHTML = `
+        <div class="search-result-header" style="margin-bottom: 0;">
+          <span class="chapter-title">${highlightedTitle}</span>
+          <span class="chapter-page">Page ${result.page}</span>
+        </div>
+      `;
+      btn.addEventListener('click', () => {
+        pageFlip?.flip(result.page - 1);
+        closeSidePanel();
+      });
+      searchResultsList.appendChild(btn);
+    });
+  }
+
+  // Render Full-Text Results
+  if (textResults.length > 0) {
+    const sectionTitle = document.createElement('div');
+    sectionTitle.className = 'search-section-title';
+    sectionTitle.textContent = 'Page Text';
+    searchResultsList.appendChild(sectionTitle);
+
+    textResults.forEach(result => {
+      const btn = document.createElement('button');
+      btn.className = 'search-result-item';
+      const highlightedSnippet = result.snippet.replace(queryRegex, '<mark>$1</mark>');
+
+      btn.innerHTML = `
+        <div class="search-result-header">
+          <span class="chapter-title" style="color: var(--accent);">Page ${result.page}</span>
+        </div>
+        <div class="search-result-snippet">${highlightedSnippet}</div>
+      `;
+      btn.addEventListener('click', () => {
+        pageFlip?.flip(result.page - 1);
+        closeSidePanel();
+      });
+      searchResultsList.appendChild(btn);
+    });
+  }
 }
 
 function escapeRegExp(string) {
