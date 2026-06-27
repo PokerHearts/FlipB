@@ -586,10 +586,23 @@ document.addEventListener('fullscreenchange', async () => {
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 function startInitialPage() {
-  let startPage = parseInt(getParam('page') || getParam('index') || window.location.hash.replace('#page=', '').replace('#index=', ''), 10);
-  if (!isNaN(startPage) && startPage >= 1 && startPage <= totalPages) {
-    pageFlip?.flip(startPage - 1);
-  } else {
+  try {
+    let startPage = parseInt(getParam('page') || getParam('index') || window.location.hash.replace('#page=', '').replace('#index=', ''), 10);
+    if (!isNaN(startPage) && startPage > 1 && startPage <= totalPages) {
+      updatePageUI(startPage - 1);
+      setTimeout(() => {
+        try {
+          pageFlip?.flip(startPage - 1);
+        } catch (e) {
+          console.warn('Initial flip failed:', e);
+        }
+      }, 50);
+    } else {
+      updatePageUI(0);
+      prefetchAround(0);
+    }
+  } catch (err) {
+    console.error('Error starting initial page:', err);
     updatePageUI(0);
     prefetchAround(0);
   }
@@ -656,13 +669,14 @@ window.addEventListener('resize', debounce(handleResize, 150));
 // ─── Side Panel (Index & Search) ──────────────────────────────────────
 
 function openSidePanel(activeTab = 'toc') {
+  if (!sidePanel) return;
   sidePanel.classList.add('active');
 
   if (activeTab === 'toc') {
-    tabToc.classList.add('active');
-    tabSearch.classList.remove('active');
-    sectionToc.classList.add('active');
-    sectionSearch.classList.remove('active');
+    if (tabToc) tabToc.classList.add('active');
+    if (tabSearch) tabSearch.classList.remove('active');
+    if (sectionToc) sectionToc.classList.add('active');
+    if (sectionSearch) sectionSearch.classList.remove('active');
     
     // Load Table of Contents
     if (bookMode === 'pdf') {
@@ -671,45 +685,59 @@ function openSidePanel(activeTab = 'toc') {
       loadWebPOTOC(currentMeta);
     }
   } else {
-    tabToc.classList.remove('active');
-    tabSearch.classList.add('active');
-    sectionToc.classList.remove('active');
-    sectionSearch.classList.add('active');
-    setTimeout(() => searchBoxInput.focus(), 150);
+    if (tabToc) tabToc.classList.remove('active');
+    if (tabSearch) tabSearch.classList.add('active');
+    if (sectionToc) sectionToc.classList.remove('active');
+    if (sectionSearch) sectionSearch.classList.add('active');
+    if (searchBoxInput) setTimeout(() => searchBoxInput.focus(), 150);
   }
 }
 
 function closeSidePanel() {
-  sidePanel.classList.remove('active');
+  if (sidePanel) sidePanel.classList.remove('active');
 }
 
-btnToc.addEventListener('click', () => {
-  if (sidePanel.classList.contains('active') && sectionToc.classList.contains('active')) {
-    closeSidePanel();
-  } else {
-    openSidePanel('toc');
-  }
-});
+if (btnToc) {
+  btnToc.addEventListener('click', () => {
+    if (sidePanel && sidePanel.classList.contains('active') && sectionToc && sectionToc.classList.contains('active')) {
+      closeSidePanel();
+    } else {
+      openSidePanel('toc');
+    }
+  });
+}
 
-btnSearch.addEventListener('click', () => {
-  if (sidePanel.classList.contains('active') && sectionSearch.classList.contains('active')) {
-    closeSidePanel();
-  } else {
-    openSidePanel('search');
-  }
-});
+if (btnSearch) {
+  btnSearch.addEventListener('click', () => {
+    if (sidePanel && sidePanel.classList.contains('active') && sectionSearch && sectionSearch.classList.contains('active')) {
+      closeSidePanel();
+    } else {
+      openSidePanel('search');
+    }
+  });
+}
 
-btnPanelClose.addEventListener('click', closeSidePanel);
+if (btnPanelClose) {
+  btnPanelClose.addEventListener('click', closeSidePanel);
+}
 
 // Tab switching
-tabToc.addEventListener('click', () => openSidePanel('toc'));
-tabSearch.addEventListener('click', () => openSidePanel('search'));
+if (tabToc) {
+  tabToc.addEventListener('click', () => openSidePanel('toc'));
+}
+if (tabSearch) {
+  tabSearch.addEventListener('click', () => openSidePanel('search'));
+}
 
 // Search trigger
-btnSearchTrigger.addEventListener('click', doSearch);
-searchBoxInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter') doSearch();
-});
+if (btnSearchTrigger) {
+  btnSearchTrigger.addEventListener('click', doSearch);
+}
+if (searchBoxInput) {
+  searchBoxInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') doSearch();
+  });
+}
 
 function doSearch() {
   const query = searchBoxInput.value.trim();
