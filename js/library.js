@@ -1,7 +1,7 @@
 /**
  * library.js – Controller for index.html
- * Automatically lists PDFs in the PDFs/ folder by querying the GitHub API
- * when hosted on GitHub Pages, merging with custom metadata from books.json.
+ * Automatically scans the GitHub repository books/ folder via the GitHub API,
+ * downloads their meta.json files, and renders flipbook library cards dynamically.
  */
 
 import { fmtDate, debounce, applyTheme, getTheme, toggleTheme } from './modules/utils.js';
@@ -26,9 +26,8 @@ themeToggle.addEventListener('click', () => toggleTheme());
 loadCatalog();
 
 // ─── Utility: Parse Title from Filename ────────────────────────────────────
-function cleanTitle(filename) {
-  const base = filename.replace(/\.pdf$/i, '');
-  return base
+function cleanTitle(slug) {
+  return slug
     .replace(/[-_]+/g, ' ')
     .replace(/%20/g, ' ')
     .trim()
@@ -37,84 +36,100 @@ function cleanTitle(filename) {
     .join(' ');
 }
 
-// ─── Auto-detect GitHub Owner/Repo ────────────────────────────────────────
-function getGitHubRepo() {
-  const hostname = window.location.hostname;
-  const pathParts = window.location.pathname.split('/').filter(Boolean);
-
-  if (hostname.endsWith('.github.io')) {
-    const owner = hostname.split('.')[0];
-    // If pathParts[0] is empty, it's a User Page, so repo is owner.github.io
-    const repo = pathParts[0] || `${owner}.github.io`;
-    return { owner, repo };
-  }
-  return null;
-}
-
 // ─── Fetch catalog ────────────────────────────────────────────────────────
 async function loadCatalog() {
-  let booksMetadata = [];
+  let githubRepo = '';
+  
+  // 1. Read repository from config.json
   try {
-    const res = await fetch('books.json');
-    if (res.ok) booksMetadata = await res.json();
+    const configRes = await fetch('config.json');
+    if (configRes.ok) {
+      const config = await configRes.json();
+      githubRepo = config.github_repo;
+    }
   } catch (e) {
-    // Optional books.json missing or corrupt is fine
+    console.warn('Failed to load config.json:', e);
   }
 
-  const github = getGitHubRepo();
-  let discoveredFiles = [];
-
-  if (github && github.owner && github.repo) {
-    try {
-      let apiUrl = `https://api.github.com/repos/${github.owner}/${github.repo}/contents/PDFs`;
-      let res = await fetch(apiUrl);
-      if (!res.ok) {
-        apiUrl = `https://api.github.com/repos/${github.owner}/${github.repo}/contents/pdfs`;
-        res = await fetch(apiUrl);
+  // Fallback: try to auto-detect from hostname if config.json is default
+  if (!githubRepo || githubRepo === 'username/repo-name') {
+    const host = window.location.hostname;
+    const path = window.location.pathname;
+    if (host.includes('.github.io')) {
+      const owner = host.split('.')[0];
+      const repo = path.split('/')[1] || '';
+      if (owner && repo) {
+        githubRepo = `${owner}/${repo}`;
       }
-      if (res.ok) {
-        const files = await res.json();
-        discoveredFiles = files.filter(f => f.type === 'file' && f.name.toLowerCase().endsWith('.pdf'));
-      }
-    } catch (e) {
-      console.warn('Failed to query GitHub API for PDFs list:', e);
     }
   }
 
-  // Merge discovered files with booksMetadata
-  if (discoveredFiles.length > 0) {
-    catalog = discoveredFiles.map(file => {
-      // Find override in books.json by matching file or slug
-      const slug = file.name.replace(/\.pdf$/i, '');
-      const override = booksMetadata.find(b => b.file === file.name || b.slug === slug);
-      return {
-        slug: slug,
-        title: override?.title || cleanTitle(file.name),
-        file: file.path,
-        author: override?.author || '',
-        category: override?.category || 'General',
-        desc: override?.desc || '',
-        cover: override?.cover || '',
-        created: override?.created || Date.now(),
-        pages: override?.pages || null
-      };
-    });
-  } else {
-    // Local development fallback or API rate-limited: use books.json list
-    catalog = booksMetadata.map(b => ({
-      slug: b.slug || b.file?.replace(/\.pdf$/i, '') || 'book',
-      title: b.title || cleanTitle(b.file || 'book.pdf'),
-      file: b.file || `${b.slug}.pdf`,
-      author: b.author || '',
-      category: b.category || 'General',
-      desc: b.desc || '',
-      cover: b.cover || '',
-      created: b.created || Date.now(),
-      pages: b.pages || null
-    }));
+  // If we still don't know the repository, show instructions
+  if (!githubRepo || githubRepo === 'username/repo-name') {
+    showConfigureMessage();
+    return;
+  }
+
+  // 2. Query GitHub Contents API to discover subfolders in books/
+  try {
+    const apiUrl = `https://api.github.com/repos/${githubRepo}/contents/books`;
+    const res = await fetch(apiUrl);
+    
+    if (!res.ok) {
+      if (res.status === 404) {
+        // Books folder doesn't exist yet
+        catalog = [];
+        render();
+        return;
+      }
+      throw new Error(`GitHub API returned ${res.status}`);
+    }
+    
+    const items = await res.json();
+    
+    // Filter out directories (each directory is a book slug)
+    const folders = items.filter(item => item.type === 'dir').map(item => item.name);
+
+    // Fetch details for each book folder in parallel
+    const books = await Promise.all(
+      folders.map(async slug => {
+        try {
+          const metaUrl = `books/${slug}/meta.json`;
+          const metaRes = await fetch(metaUrl);
+          if (metaRes.ok) {
+            const meta = await metaRes.json();
+            return {
+              slug: meta.slug || slug,
+              title: meta.title || cleanTitle(slug),
+              author: meta.author || '',
+              category: meta.category || 'General',
+              desc: meta.desc || '',
+              pages: meta.pages || 0,
+              created: meta.created || Date.now(),
+              cover: `books/${slug}/cover.webp`
+            };
+          }
+        } catch (e) {
+          console.warn('Failed to load metadata for', slug, e);
+        }
+        return null;
+      })
+    );
+
+    catalog = books.filter(Boolean);
+  } catch (err) {
+    console.error('GitHub catalog scan failed:', err);
+    // Local fallback: try loading from a local list if offline
+    catalog = [];
   }
 
   render();
+}
+
+function showConfigureMessage() {
+  emptyState.classList.remove('hidden');
+  emptyState.querySelector('p').innerHTML = 
+    `Please configure your GitHub repository name in <code class="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">config.json</code> to enable automated book scanning.`;
 }
 
 // ─── Search & filter ──────────────────────────────────────────────────────
@@ -173,37 +188,28 @@ function buildCard(book) {
   card.setAttribute('role', 'article');
   card.setAttribute('aria-label', book.title);
 
-  // Use cover image if specified, otherwise placeholder
-  const hasCover = !!book.cover;
-  const coverHTML = hasCover
-    ? `<img src="${book.cover}" alt="${book.title} cover" loading="lazy"
-           onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"/>
-       <div class="book-cover-placeholder" style="display:none">
-         ${bookIcon()}
-         <span class="text-xs text-muted">${book.file || book.slug}</span>
-       </div>`
-    : `<div class="book-cover-placeholder">
-         ${bookIcon()}
-         <span class="text-xs text-muted">${book.file || book.slug}</span>
-       </div>`;
-
-  const viewerLink = `viewer.html?pdf=${encodeURIComponent(book.file)}`;
-
   card.innerHTML = `
     <div class="book-cover">
-      ${coverHTML}
+      <img src="${book.cover}" alt="${book.title} cover" loading="lazy"
+           onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"/>
+      <div class="book-cover-placeholder" style="display:none">
+        ${bookIcon()}
+        <span class="text-xs text-muted">${book.slug}</span>
+      </div>
       ${book.category ? `<span class="book-category-badge">${book.category}</span>` : ''}
     </div>
     <div class="book-info">
       <div class="book-title">${book.title}</div>
       ${book.author ? `<div class="book-author">by ${book.author}</div>` : '<div class="book-author">&nbsp;</div>'}
       <div class="book-meta">
-        <span class="book-pages">${book.pages ? book.pages + ' pages' : book.file}</span>
+        <span class="book-pages">${book.pages ? book.pages + ' pages' : ''}</span>
         <button class="btn-open">Open</button>
       </div>
     </div>`;
 
-  const openViewer = () => { location.href = viewerLink; };
+  const openViewer = () => {
+    location.href = `viewer.html?book=${encodeURIComponent(book.slug)}`;
+  };
 
   card.querySelector('.btn-open').addEventListener('click', e => {
     e.stopPropagation();

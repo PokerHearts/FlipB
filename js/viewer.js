@@ -39,9 +39,11 @@ let pageFlip       = null;
 let pdfDoc         = null;
 let totalPages     = 0;
 let zoomLevel      = 1;
-let pageURLs       = [];     // rendered blob URLs per page
+let pageURLs       = [];     // URLs for each page (WebP files or PDF blob URLs)
 let rendering      = {};     // track in-progress renders
 let isLandscapePDF = false;  // automatically locks landscape view
+let bookMode       = 'pdf';  // 'pdf' or 'webp'
+let bookBaseURL    = '';     // base URL for WebP images folder
 
 const RENDER_SCALE   = 3.0; // 3.0x scale for crisp Retina quality
 const PREFETCH_AHEAD = 3;
@@ -51,14 +53,21 @@ const PREFETCH_AHEAD = 3;
 applyTheme(getTheme());
 themeToggle.addEventListener('click', () => toggleTheme());
 
-// Determine PDF to load
+// Route based on parameter
 const pdfParam  = getParam('pdf');
 const bookParam = getParam('book');
 
 if (pdfParam) {
-  init(pdfParam, pdfParam.replace(/\.pdf$/i, ''));
+  bookMode = 'pdf';
+  initPDF(pdfParam, pdfParam.replace(/\.pdf$/i, ''));
 } else if (bookParam) {
-  initFromCatalog(bookParam);
+  // If bookParam is a URL or has folders, load as external WebP. Otherwise, check catalog
+  if (bookParam.startsWith('http://') || bookParam.startsWith('https://')) {
+    bookMode = 'webp';
+    initWebP(bookParam);
+  } else {
+    initFromCatalog(bookParam);
+  }
 } else {
   showError('No book specified. Use ?pdf=filename.pdf or ?book=slug');
 }
@@ -90,17 +99,23 @@ async function initFromCatalog(slug) {
     const entry = catalog.find(b => b.slug === slug);
     if (!entry) throw new Error('Not in catalog');
 
-    const pdfFile = entry.file || `${slug}.pdf`;
-    init(pdfFile, entry.title || slug, entry.author);
+    if (entry.file) {
+      bookMode = 'pdf';
+      initPDF(entry.file, entry.title || slug, entry.author);
+    } else {
+      bookMode = 'webp';
+      initWebP(entry.gcs_url || entry.slug);
+    }
   } catch {
-    // Fallback: try loading slug.pdf directly
-    init(`${slug}.pdf`, slug);
+    // Fallback: try loading slug as a WebP book folder
+    bookMode = 'webp';
+    initWebP(slug);
   }
 }
 
-// ─── Main init ────────────────────────────────────────────────────────────
+// ─── PDF Mode Init ────────────────────────────────────────────────────────
 
-async function init(pdfFilename, title, author) {
+async function initPDF(pdfFilename, title, author) {
   setLoadingText('Loading PDF…');
 
   const pdfPath = (pdfFilename.toLowerCase().startsWith('pdfs/') || pdfFilename.toLowerCase().startsWith('pdf/'))
@@ -123,12 +138,39 @@ async function init(pdfFilename, title, author) {
   totalPages = pdfDoc.numPages;
   setLoadingText(`Rendering ${totalPages} pages…`);
 
-  await buildFlipbook();
+  await buildFlipbookPDF();
 }
 
-// ─── Build flipbook ───────────────────────────────────────────────────────
+// ─── WebP Mode Init ───────────────────────────────────────────────────────
 
-async function buildFlipbook() {
+async function initWebP(path) {
+  setLoadingText('Loading metadata…');
+  
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    bookBaseURL = path.endsWith('/') ? path.slice(0, -1) : path;
+  } else {
+    bookBaseURL = `books/${path}`;
+  }
+
+  try {
+    const res = await fetch(`${bookBaseURL}/meta.json`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const meta = await res.json();
+
+    document.title = `${meta.title || 'Book'} — Flipbook`;
+    navTitle.textContent  = meta.title || 'Book';
+    navAuthor.textContent = meta.author ? `by ${meta.author}` : '';
+    totalPages = meta.pages;
+
+    await buildFlipbookWebP();
+  } catch (err) {
+    showError('Could not load book metadata. Make sure the files are uploaded and public.');
+  }
+}
+
+// ─── Build PDF Flipbook ───────────────────────────────────────────────────
+
+async function buildFlipbookPDF() {
   // Get first page dimensions for sizing
   const firstPage = await pdfDoc.getPage(1);
   const vp        = firstPage.getViewport({ scale: RENDER_SCALE });
@@ -236,6 +278,120 @@ async function buildFlipbook() {
   zoomOverlay.addEventListener('click', () => zoomOverlay.classList.remove('active'));
 }
 
+// ─── Build WebP Flipbook ──────────────────────────────────────────────────
+
+async function buildFlipbookWebP() {
+  setLoadingText('Calculating page sizes…');
+
+  // Build WebP page paths
+  pageURLs = [];
+  for (let i = 0; i < totalPages; i++) {
+    pageURLs.push(`${bookBaseURL}/pages/${i + 1}.webp`);
+  }
+
+  // Detect image aspect ratio by loading page 1
+  let ratio = 1.414; // Default A4 ratio
+  try {
+    ratio = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img.naturalHeight / img.naturalWidth);
+      img.onerror = () => reject();
+      img.src = pageURLs[0];
+    });
+  } catch (err) {
+    console.warn('Could not determine aspect ratio, using standard A4');
+  }
+
+  isLandscapePDF = ratio < 1.0;
+
+  // Stage dimensions
+  const stageW = flipbookWrap.clientWidth  - 16;
+  const stageH = flipbookWrap.clientHeight - 16;
+
+  let pageW, pageH;
+  const isMobile = window.innerWidth < 640;
+  const useSinglePage = isMobile || isLandscapePDF;
+
+  if (useSinglePage) {
+    pageW = stageW - 16;
+    pageH = Math.round(pageW * ratio);
+    if (pageH > stageH - 16) {
+      pageH = stageH - 16;
+      pageW = Math.round(pageH / ratio);
+    }
+  } else {
+    pageH = stageH - 20;
+    pageW = Math.round(pageH / ratio);
+
+    if (pageW * 2 > stageW - 20) {
+      pageW = Math.floor((stageW - 20) / 2);
+      pageH = Math.round(pageW * ratio);
+    }
+  }
+
+  // Build DOM elements for StPageFlip HTML mode
+  flipbookEl.innerHTML = '';
+  for (let i = 0; i < totalPages; i++) {
+    const pageDiv = document.createElement('div');
+    pageDiv.className = 'page';
+    if (i === 0 || i === totalPages - 1) {
+      pageDiv.setAttribute('data-density', 'hard');
+    }
+
+    const img = document.createElement('img');
+    // Load first two pages immediately to avoid flash of white
+    img.src = i < 2 ? pageURLs[i] : makeBlankDataURL();
+    img.alt = `Page ${i + 1}`;
+    img.style.width = '100%';
+    img.style.height = '100%';
+    img.style.objectFit = 'contain';
+    img.style.display = 'block';
+
+    pageDiv.appendChild(img);
+    flipbookEl.appendChild(pageDiv);
+  }
+
+  // Initialize StPageFlip
+  pageFlip = new St.PageFlip(flipbookEl, {
+    width:      pageW,
+    height:     pageH,
+    size:       'fixed',
+    minWidth:   useSinglePage ? pageW : pageW * 2,
+    maxWidth:   useSinglePage ? pageW : pageW * 2,
+    minHeight:  pageH,
+    maxHeight:  pageH,
+    maxShadowOpacity: 0.5,
+    showCover:  !useSinglePage,
+    mobileScrollSupport: true,
+    swipeDistance: 30,
+    usePortrait: useSinglePage,
+    autoSize:    false,
+  });
+
+  pageFlip.loadFromHTML(flipbookEl.querySelectorAll('.page'));
+
+  pageFlip.on('flip', e => {
+    updatePageUI(e.data);
+    prefetchAround(e.data);
+  });
+
+  pageFlip.on('changeState', e => {
+    if (e.data === 'read') prefetchAround(pageFlip.getCurrentPageIndex());
+  });
+
+  // Hide loading, start prefetch
+  setTimeout(() => {
+    loadingScreen.classList.add('hidden');
+    updatePageUI(0);
+    prefetchAround(0);
+  }, 300);
+
+  // Controls
+  document.addEventListener('keydown', onKeydown);
+  flipbookEl.addEventListener('dblclick', onDoubleClick);
+  zoomOverlay.addEventListener('click', () => zoomOverlay.classList.remove('active'));
+}
+
 // ─── Render a single PDF page to blob URL ─────────────────────────────────
 
 async function renderPage(pageNum) {
@@ -264,24 +420,28 @@ async function prefetchAround(pageIndex) {
   const end   = Math.min(totalPages - 1, pageIndex + PREFETCH_AHEAD);
 
   for (let i = start; i <= end; i++) {
-    if (!pageURLs[i].startsWith('data:')) continue; // already rendered
-    if (rendering[i]) continue; // already in progress
+    const pageDivs = flipbookEl.querySelectorAll('.page');
+    if (!pageDivs[i]) continue;
+    const img = pageDivs[i].querySelector('img');
+    if (!img) continue;
 
-    rendering[i] = true;
-    try {
-      const url = await renderPage(i + 1); // PDF.js is 1-indexed
-      pageURLs[i] = url;
-
-      // Update DOM page image
-      const pageDivs = flipbookEl.querySelectorAll('.page');
-      if (pageDivs[i]) {
-        const img = pageDivs[i].querySelector('img');
-        if (img) img.src = url;
+    if (img.src.startsWith('data:')) {
+      if (bookMode === 'pdf') {
+        if (rendering[i]) continue;
+        rendering[i] = true;
+        try {
+          const url = await renderPage(i + 1);
+          pageURLs[i] = url;
+          img.src = url;
+        } catch (e) {
+          console.error('Failed to render page:', i + 1, e);
+        }
+        rendering[i] = false;
+      } else {
+        // WebP mode: swap placeholder with actual WebP URL
+        img.src = pageURLs[i];
       }
-    } catch (e) {
-      console.error('Failed to prefetch page:', i + 1, e);
     }
-    rendering[i] = false;
   }
 }
 
