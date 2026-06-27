@@ -162,7 +162,7 @@ async function initWebP(path) {
     navAuthor.textContent = meta.author ? `by ${meta.author}` : '';
     totalPages = meta.pages;
 
-    await buildFlipbookWebP();
+    await buildFlipbookWebP(meta);
   } catch (err) {
     showError('Could not load book metadata. Make sure the files are uploaded and public.');
   }
@@ -280,13 +280,15 @@ async function buildFlipbookPDF() {
 
 // ─── Build WebP Flipbook ──────────────────────────────────────────────────
 
-async function buildFlipbookWebP() {
+async function buildFlipbookWebP(meta) {
   setLoadingText('Calculating page sizes…');
 
-  // Build WebP page paths
+  const ext = meta.extension || 'webp';
+
+  // Build page paths
   pageURLs = [];
   for (let i = 0; i < totalPages; i++) {
-    pageURLs.push(`${bookBaseURL}/pages/${i + 1}.webp`);
+    pageURLs.push(`${bookBaseURL}/pages/${i + 1}.${ext}`);
   }
 
   // Detect image aspect ratio by loading page 1

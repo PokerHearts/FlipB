@@ -2,7 +2,7 @@ import os
 import fitz  # PyMuPDF
 import json
 
-def convert_pdf_to_webp(pdf_path, output_dir, dpi=300):
+def convert_pdf_to_webp(pdf_path, output_dir, dpi=150):
     # Open the PDF document
     doc = fitz.open(pdf_path)
     book_slug = os.path.splitext(os.path.basename(pdf_path))[0].lower().replace(" ", "_")
@@ -22,9 +22,13 @@ def convert_pdf_to_webp(pdf_path, output_dir, dpi=300):
         page = doc.load_page(page_num)
         pix = page.get_pixmap(matrix=matrix)
         
-        # Save as WebP (format is auto-detected from extension)
-        output_file = os.path.join(pages_dir, f"{page_num + 1}.webp")
-        pix.save(output_file)
+        # If image has an alpha (transparency) channel, convert to RGB for JPG format
+        if pix.alpha:
+            pix = fitz.Pixmap(fitz.csRGB, pix)
+            
+        # Save as JPG with 85% quality (excellent sharpness with tiny file sizes)
+        output_file = os.path.join(pages_dir, f"{page_num + 1}.jpg")
+        pix.save(output_file, jpg_quality=85)
         print(f"Rendered page {page_num + 1}/{len(doc)}")
 
     # Generate metadata file
@@ -32,6 +36,7 @@ def convert_pdf_to_webp(pdf_path, output_dir, dpi=300):
         "slug": book_slug,
         "title": book_slug.replace("_", " ").title(),
         "pages": len(doc),
+        "extension": "jpg",
         "created": int(fitz.time_now() * 1000) if hasattr(fitz, "time_now") else 0
     }
     

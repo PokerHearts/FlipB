@@ -106,7 +106,7 @@ async function loadCatalog() {
               desc: meta.desc || '',
               pages: meta.pages || 0,
               created: meta.created || Date.now(),
-              cover: `books/${slug}/cover.webp`
+              cover: meta.cover || `books/${slug}/pages/1.${meta.extension || 'jpg'}`
             };
           }
         } catch (e) {
